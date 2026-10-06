@@ -4,12 +4,17 @@ TestClient sends simulated HTTP requests directly to the application. Tests
 substitute a fake workflow when they need to inspect coordination or isolation.
 """
 
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.outreach import get_research_client
 from app.main import app
+from app.models.client import FakeModelClient, ModelClientError
+from app.models.schemas import Prospect
+from app.orchestration.graph import outreach_graph
 from app.orchestration.state import OutreachState
 
 
@@ -34,8 +39,40 @@ def test_outreach_returns_ready_state(client):
         "strategies": {},
         "drafts": {},
         "reviews": {},
-        "current_step": "skeleton_ready",
+        "current_step": "research_complete",
     }
+
+
+def test_outreach_reaches_langgraph_through_existing_workflow(client, monkeypatch):
+    # Wrap the real graph call so this checks the complete path through the API.
+    graph_call = AsyncMock(wraps=outreach_graph.ainvoke)
+    monkeypatch.setattr(
+        "app.orchestration.workflow.outreach_graph",
+        SimpleNamespace(ainvoke=graph_call),
+    )
+    goal = "Find professors researching wearable AI and prepare PhD outreach."
+
+    response = client.post("/outreach", json={"goal": goal})
+
+    assert response.status_code == 200
+    assert response.json() == OutreachState(
+        goal=goal, current_step="research_complete"
+    ).model_dump(mode="json")
+    graph_call.assert_awaited_once()
+    assert isinstance(graph_call.await_args.args[0], OutreachState)
+
+
+def test_invalid_request_never_reaches_graph(client, monkeypatch):
+    graph_call = AsyncMock()
+    monkeypatch.setattr(
+        "app.orchestration.workflow.outreach_graph",
+        SimpleNamespace(ainvoke=graph_call),
+    )
+
+    response = client.post("/outreach", json={"goal": "   "})
+
+    assert response.status_code == 422
+    graph_call.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -198,3 +235,105 @@ def test_api_documentation_is_available(client):
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
+
+
+def test_api_research_with_injected_fake_client(client, monkeypatch, records, research_material):
+    fake = FakeModelClient([{"prospects": [records[Prospect].model_dump()]}])
+    monkeypatch.setitem(app.dependency_overrides, get_research_client, lambda: fake)
+
+    response = client.post("/outreach", json={"goal": "Find AI startups", "research_material": research_material})
+
+    assert response.status_code == 200
+    assert response.json() == OutreachState(
+        goal="Find AI startups", prospects=[records[Prospect]], current_step="research_complete",
+    ).model_dump(mode="json")
+    assert len(fake.calls) == 1
+    assert "research_material" not in response.json()
+
+
+def test_api_reports_missing_research_configuration(client, monkeypatch, research_material):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+
+    response = client.post("/outreach", json={"goal": "Find AI startups", "research_material": research_material})
+
+    assert response.status_code == 503
+    assert "OPENAI_MODEL" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("material", [None, 42, True, [], {}])
+def test_invalid_material_is_rejected_before_client_creation(client, monkeypatch, material):
+    factory = Mock(side_effect=AssertionError("The client must not be created"))
+    monkeypatch.setattr("app.api.outreach.OpenAIModelClient.from_env", factory)
+
+    response = client.post("/outreach", json={"goal": "Find AI startups", "research_material": material})
+
+    assert response.status_code == 422
+    factory.assert_not_called()
+
+
+def test_invalid_goal_with_material_stops_before_client_creation(client, monkeypatch, research_material):
+    factory = Mock(side_effect=AssertionError("The client must not be created"))
+    monkeypatch.setattr("app.api.outreach.OpenAIModelClient.from_env", factory)
+
+    response = client.post("/outreach", json={"goal": " ", "research_material": research_material})
+
+    assert response.status_code == 422
+    factory.assert_not_called()
+
+
+@pytest.mark.parametrize("material", ["", " \n\t "])
+def test_blank_material_needs_no_model_configuration(client, monkeypatch, material):
+    factory = Mock(side_effect=AssertionError("The client must not be created"))
+    monkeypatch.setattr("app.api.outreach.OpenAIModelClient.from_env", factory)
+
+    response = client.post("/outreach", json={"goal": "Find AI startups", "research_material": material})
+
+    assert response.status_code == 200
+    assert response.json()["prospects"] == []
+    assert response.json()["current_step"] == "research_complete"
+    factory.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ["request", "output"])
+def test_api_model_failure_returns_error_instead_of_success(client, monkeypatch, research_material, failure):
+    if failure == "request":
+        fake = SimpleNamespace(generate_structured=AsyncMock(side_effect=ModelClientError("Private failure details")))
+    else:
+        fake = FakeModelClient([{"prospects": [{}]}])
+    monkeypatch.setitem(app.dependency_overrides, get_research_client, lambda: fake)
+
+    response = client.post("/outreach", json={"goal": "Find AI startups", "research_material": research_material})
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Research could not complete."}
+
+
+@pytest.mark.parametrize("valid_output", [True, False])
+def test_api_owned_client_is_closed_on_success_and_failure(
+    client, monkeypatch, research_material, records, valid_output
+):
+    payload = {"prospects": [records[Prospect].model_dump()]} if valid_output else {"prospects": [{}]}
+    fake = FakeModelClient([payload])
+    manager = MagicMock()
+    manager.__aenter__ = AsyncMock(return_value=fake)
+    manager.__aexit__ = AsyncMock(return_value=False)
+    factory = Mock(return_value=manager)
+    monkeypatch.setattr("app.api.outreach.OpenAIModelClient.from_env", factory)
+
+    response = client.post("/outreach", json={"goal": "Find AI startups", "research_material": research_material})
+
+    assert response.status_code == (200 if valid_output else 502)
+    factory.assert_called_once_with()
+    manager.__aenter__.assert_awaited_once()
+    manager.__aexit__.assert_awaited_once()
+
+
+def test_openapi_documents_optional_material_and_research_status(client):
+    components = client.get("/openapi.json").json()["components"]["schemas"]
+
+    request = components["OutreachRequest"]
+    assert request["required"] == ["goal"]
+    assert request["properties"]["research_material"]["type"] == "string"
+    assert request["properties"]["research_material"]["default"] == ""
+    assert "research_complete" in components["OutreachState"]["properties"]["current_step"]["enum"]

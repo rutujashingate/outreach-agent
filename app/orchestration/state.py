@@ -30,5 +30,5 @@ class OutreachState(BaseModel):
     strategies: dict[str, OutreachStrategy] = Field(default_factory=dict)
     drafts: dict[str, EmailDraft] = Field(default_factory=dict)
     reviews: dict[str, ReviewResult] = Field(default_factory=dict)
-    # Literal describes the two progress labels supported by this phase.
-    current_step: Literal["initialized", "skeleton_ready"] = "initialized"
+    # Retain the earlier label for existing records and add the research result.
+    current_step: Literal["initialized", "skeleton_ready", "research_complete"] = "initialized"

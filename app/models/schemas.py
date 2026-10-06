@@ -36,12 +36,18 @@ EmailBody = Annotated[
 
 
 class OutreachRequest(BaseModel):
-    """The user's goal is the only accepted request field."""
+    """A required goal and optional evidence for the phase-four researcher."""
 
     # Reject unknown fields, such as a misspelled goal or client-supplied state.
     model_config = ConfigDict(extra="forbid")
 
     goal: GoalText
+    # Until search is added, callers can supply notes and source references.
+    # Preserve their formatting. Omitted or blank material needs no model call.
+    research_material: str = Field(
+        default="", strict=True,
+        description="Source-backed research notes. Omitted or blank material needs no model call.",
+    )
 
 
 class Prospect(BaseModel):
@@ -62,6 +68,15 @@ class Prospect(BaseModel):
     signals: list[NonEmptyText] = Field(default_factory=list)
     # Store the references that future research uses to support its findings.
     sources: list[NonEmptyText] = Field(default_factory=list)
+
+
+class ResearchResult(BaseModel):
+    """Wrap a batch of existing Prospect records for structured model output."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # The model must explicitly return a list, including [] for no matches.
+    prospects: list[Prospect]
 
 
 class Qualification(BaseModel):

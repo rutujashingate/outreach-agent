@@ -5,6 +5,8 @@ function scope by default, so each test gets fresh examples. The company and
 contact below are test data, not the results of actual research.
 """
 
+import json
+
 import pytest
 
 from app.models.schemas import (
@@ -80,3 +82,9 @@ def populated_state(outreach_results):
     """Provide a complete state to test JSON conversion and preservation."""
     # ** expands dictionary entries into named arguments, such as prospects=...
     return OutreachState(goal="Find AI startups", **outreach_results)
+
+
+@pytest.fixture
+def research_material(records):
+    """Source-backed sample notes, supplied locally instead of using search."""
+    return json.dumps(records[Prospect].model_dump(mode="json"), ensure_ascii=False, indent=2)

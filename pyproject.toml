@@ -14,6 +14,8 @@ dependencies = [
     "fastapi>=0.115,<1",  # Handle HTTP requests and generate API documentation.
     "pydantic>=2.9,<3",  # Define and validate the application's data records.
     "uvicorn>=0.30,<1",  # Run the web server that serves the FastAPI application.
+    "openai>=2.11,<3",  # Make structured model calls through the shared client.
+    "langgraph>=1.0,<2",  # Run workflow steps through an explicit state graph.
 ]
 
 # The extra packages included by pip install -e '.[dev]' support local tests.
