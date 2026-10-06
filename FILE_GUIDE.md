@@ -155,6 +155,10 @@ You chose Groq as the model provider. We extended the phase-three client boundar
 
 After phase two, we collected the file explanations in this guide. Later phases added comments, model-client explanations, graph history, and researcher explanations. After phase four we first expanded the roadmap without adding code. Your clarification led to the complete workflow implementation described above. This guide, the README, and the plan now describe that code and distinguish it from optional integrations or later refinements.
 
+After the V1 CLI work, we rewrote `README.md` for someone meeting the project for the first time, including a hiring reviewer. It now starts with the problem being solved and a fictional demo, then shows the workflow and the connections between files in two diagrams. It explains that both default database files use SQLite and that PostgreSQL is optional. The engineering decisions link to their implementation, so a reader can see the work behind each claim. Detailed API requests and advanced integration settings moved to `docs/API_GUIDE.md`. This documentation update does not change application behavior or claim measured business results.
+
+**Checks for the documentation update:** the terminal demo reached approval, accepted a decision, recorded a fake draft, displayed events, and exited. Both fake-client examples in the integration guide ran successfully without credentials. All 154 local links and heading references were checked, and the code fences and Git whitespace checks passed. The previously passing 360-test suite remains the application verification record; this update changes documentation only.
+
 ### V1 interface follow-up: Interact through the CLI
 
 You chose the terminal for V1 so we can try real goals and configured keys before building other interfaces. This reuses the existing work: phase 3's model client, phase 9's relationship database, phase 16's saved progress, phases 17–18's approval flow, and phase 27's limits/recovery.
@@ -198,6 +202,10 @@ SQLite keeps data in ordinary files on your computer. SQLAlchemy is the Python h
 These files are created automatically when the normal runtime opens. They are separate because relationship history can help later goals, while a checkpoint belongs to one execution. The CLI and API share them when they use the same project folder and settings. `OUTREACH_DATA_DIR` changes the local location. PostgreSQL remains an optional deployment choice; V1 uses SQLite by default.
 
 ## How a request moves through the application
+
+For V1, start with the terminal path. `app/cli.py` collects your answers and creates a validated request. `open_runtime` opens shared services, and `RunManager` creates a run ID and its `WorkflowState`. The graph in `full_graph.py` chooses which step runs next. Its nodes call the goal interpreter, researcher, qualifier, memory tools, strategy builder, writer, and reviewer. These components share the model client, which checks that each response matches its expected record format.
+
+The repository saves relationship information and run records in `relationships.sqlite3`. The graph's checkpointer saves execution progress in `checkpoints.sqlite3`. When the workflow needs your decision, it pauses with the current draft. The CLI sends your decision back to the same manager and saved run. Approval resumes that work instead of repeating research. The [README diagrams](README.md#how-the-outreach-workflow-works) show both the decisions and the file connections.
 
 The original `POST /outreach` endpoint follows this research-only path:
 
@@ -414,17 +422,18 @@ The file contains these supporting pieces:
 | `ModelResponseError` | Reports missing, incomplete, or invalid output. It is a kind of `ModelClientError`. |
 | `ModelRefusalError` | Reports that the model refused the request. It is a kind of `ModelResponseError`. |
 
-The shared function checks output from all clients against the same record rules. `GroqModelClient`, in its separate file, also follows this interface. This lets components use a fake during tests and a real client with configured credentials. The README includes an example you can run using the fake.
+The shared function checks output from all clients against the same record rules. `GroqModelClient`, in its separate file, also follows this interface. This lets components use a fake during tests and a real client with configured credentials. The [integration guide](docs/API_GUIDE.md#shared-model-calls) includes an example you can run using the fake.
 
 ## Installation and documentation files
 
 | File | Meaning |
 |---|---|
-| [AGENTS.md](AGENTS.md) | Gives coding assistants the project's documentation instructions, including updating this guide whenever the code changes. |
+| [AGENTS.md](AGENTS.md) | Gives coding assistants the project's documentation and version-control instructions: update this guide and commit each verified logical change. |
 | [pyproject.toml](pyproject.toml) | Lists the project's required packages, supported Python version, installation settings, and test settings. |
 | [.env.example](.env.example) | Lists model, search, Gmail, database, checkpoint, API-key, and limit settings. Copy it locally and explicitly export the settings you need; copying alone does not load them. |
 | [.gitignore](.gitignore) | Tells Git to ignore installed packages, generated files, local credential files, and `.data/`, which holds private local records and checkpoints. |
-| [README.md](README.md) | Instructions for installing, starting, testing, and understanding the application. |
+| [README.md](README.md) | Introduces the user problem, offline demo, V1 CLI setup, SQLite storage, workflow and file diagrams, and engineering decisions with links to code. Start here to understand the project. |
+| [docs/API_GUIDE.md](docs/API_GUIDE.md) | Keeps the optional HTTP API examples and advanced settings together: starting runs, reviewing drafts, recording replies, and configuring providers or PostgreSQL. It also explains the earlier research-only endpoint and shared model-client examples. |
 | [plan.md](plan.md) | Records the development phases, completed work, and next step. |
 | [FILE_GUIDE.md](FILE_GUIDE.md) | This explanation of the project's files and code patterns. |
 
@@ -527,7 +536,9 @@ The tests run locally without calling external services. Tests that need to insp
 
 ## Suggested reading order
 
-Start reading `app/api/outreach.py`, then follow its calls into `app/orchestration/state.py` and `app/orchestration/workflow.py`. Read `app/orchestration/graph.py` to see which step the workflow runs. Keep `app/models/schemas.py` open beside them to understand the records they use.
+For the current V1, start with the README and run `python -m app.cli --demo`. Read `app/cli.py`, the request/state classes in `app/models/workflow.py`, `app/orchestration/runtime.py`, and then `RunManager` in `app/orchestration/runs.py`. Follow `build_full_graph` in `full_graph.py` into one node and its component. Keep its prompt and the shared model client open beside it. Finally, read the repository and checkpointer to understand the two SQLite files. `tests/test_cli.py` and `tests/test_full_workflow.py` show this path with fictional inputs and expected results.
+
+For the earlier research-only foundation, start reading `app/api/outreach.py`, then follow its calls into `app/orchestration/state.py` and `app/orchestration/workflow.py`. Read `app/orchestration/graph.py` to see which step the workflow runs. Keep `app/models/schemas.py` open beside them to understand the records they use.
 
 Read `app/main.py` to see how the endpoint is connected to the web application. Then read the corresponding test files to see examples of valid input, invalid input, and expected results.
 
@@ -535,7 +546,7 @@ For phase three, read `generate_structured` in `app/models/client.py` first, the
 
 For the graph added in phase 3.5 and expanded in phase four, read `build_graph` in `graph.py`, the `research` node, and then `run_workflow` in `workflow.py`. The graph tests show the execution path; the workflow and API tests show how the rest of the application uses it.
 
-For phase four's reasoning component, read the instructions in `app/prompts/researcher.py`, then `Researcher.research` in `app/agents/researcher.py`. Compare them with the fake-client examples in `tests/test_researcher.py` and the README.
+For phase four's reasoning component, read the instructions in `app/prompts/researcher.py`, then `Researcher.research` in `app/agents/researcher.py`. Compare them with the fake-client examples in `tests/test_researcher.py` and [the integration guide](docs/API_GUIDE.md#supply-research-material).
 
 For the complete workflow, read `api/runs.py`, the request/state classes in `models/workflow.py`, then `RunManager` in `orchestration/runs.py` and `build_full_graph` in `full_graph.py`. Follow one node into its business component and prompt. Read `nodes/approval.py` with the corresponding HTTP and workflow tests to understand pause/resume. Run `python -m app.demo` to see this path without credentials.
 
