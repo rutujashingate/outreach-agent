@@ -1,6 +1,7 @@
 # Tell pip which tool builds and installs this Python package.
 [build-system]
-requires = ["setuptools>=68"]
+# Version 77 supports the standard license name and bundled license file below.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 # Basic project details, including the minimum supported Python version.
@@ -9,6 +10,8 @@ name = "outreach-agent"
 version = "0.2.0"
 description = "Goal-driven outreach with sourced research, relationship memory, and human approval."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115,<1",  # Handle HTTP requests and generate API documentation.

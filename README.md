@@ -232,3 +232,9 @@ Live evaluation uses model credits, supplied fictional evidence, and no Gmail ac
 The next practical work is to configure real accounts, try representative CLI goals, inspect failures and draft quality, and expand the evaluation cases. Initial table creation is provided; future database changes need explicit migrations. Estimated cost reservations are configurable estimates rather than exact billing caps. The optional API serves one configured account; multi-user isolation and a shared rate limiter for multiple server workers are additional deployment work.
 
 For more detail, read [FILE_GUIDE.md](FILE_GUIDE.md) for every file and phase, [plan.md](plan.md) for the implementation record, and [docs/API_GUIDE.md](docs/API_GUIDE.md) for API requests, reply ingestion, provider alternatives, and advanced settings.
+
+## Contributing and license
+
+Contributions are welcome, including documentation improvements, bug fixes, tests, and evaluation cases. Read [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, checks, pull requests, and contribution licensing.
+
+The project is released under the [MIT License](LICENSE). It permits use, modification, redistribution, and commercial use while requiring preservation of its copyright and license notices. Contributions are accepted under the same license, and contributors retain their copyright. Dependencies, model services, and Gmail retain their own licenses and terms. See [GitHub's MIT overview](https://choosealicense.com/licenses/mit/) for a plain-language explanation.

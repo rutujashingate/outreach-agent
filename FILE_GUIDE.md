@@ -201,6 +201,17 @@ SQLite keeps data in ordinary files on your computer. SQLAlchemy is the Python h
 
 These files are created automatically when the normal runtime opens. They are separate because relationship history can help later goals, while a checkpoint belongs to one execution. The CLI and API share them when they use the same project folder and settings. `OUTREACH_DATA_DIR` changes the local location. PostgreSQL remains an optional deployment choice; V1 uses SQLite by default.
 
+### Open-source follow-up: License the project and welcome contributions
+
+After the V1 interface and README explanation, we prepared the repository for outside contributions. This is a project-maintenance follow-up, not another outreach workflow phase.
+
+- Added `LICENSE` with the MIT terms and the copyright notice for `rutujashingate` and contributors. People can use, change, and share the project while preserving its notices.
+- Added `CONTRIBUTING.md` with plain instructions for reporting problems, setting up a fork, making a focused change, checking it, updating this guide, and submitting a pull request. Contributions use the same MIT license; contributors keep their copyright and must have the right to submit their work.
+- Updated `pyproject.toml` to declare `MIT` as the package license and include `LICENSE` in built packages. The minimum Setuptools build-tool version is now 77, which supports this metadata. This changes packaging, not the Python version or workflow behavior.
+- Updated the README with links to the license and contribution guide. Existing dependencies and external services keep their own terms.
+
+**Checks:** a temporary build environment produced both a wheel, the installable Python package, and a source distribution, the archive used to rebuild it. Both contain the exact `LICENSE` text; the wheel declares `MIT` in its license metadata. Neither archive includes local credentials or application data. All 161 local documentation links and heading references passed, code fences are balanced, and Git's whitespace check passed. No external-service credentials were needed.
+
 ## How a request moves through the application
 
 For V1, start with the terminal path. `app/cli.py` collects your answers and creates a validated request. `open_runtime` opens shared services, and `RunManager` creates a run ID and its `WorkflowState`. The graph in `full_graph.py` chooses which step runs next. Its nodes call the goal interpreter, researcher, qualifier, memory tools, strategy builder, writer, and reviewer. These components share the model client, which checks that each response matches its expected record format.
@@ -429,11 +440,13 @@ The shared function checks output from all clients against the same record rules
 | File | Meaning |
 |---|---|
 | [AGENTS.md](AGENTS.md) | Gives coding assistants the project's documentation and version-control instructions: update this guide and commit each verified logical change. |
-| [pyproject.toml](pyproject.toml) | Lists the project's required packages, supported Python version, installation settings, and test settings. |
+| [pyproject.toml](pyproject.toml) | Lists the project's required packages, supported Python version, installation settings, and test settings. It also declares the MIT license and bundles `LICENSE` into distributions; Setuptools 77 or newer builds that metadata. |
 | [.env.example](.env.example) | Lists model, search, Gmail, database, checkpoint, API-key, and limit settings. Copy it locally and explicitly export the settings you need; copying alone does not load them. |
 | [.gitignore](.gitignore) | Tells Git to ignore installed packages, generated files, local credential files, and `.data/`, which holds private local records and checkpoints. |
 | [README.md](README.md) | Introduces the user problem, offline demo, V1 CLI setup, SQLite storage, workflow and file diagrams, and engineering decisions with links to code. Start here to understand the project. |
 | [docs/API_GUIDE.md](docs/API_GUIDE.md) | Keeps the optional HTTP API examples and advanced settings together: starting runs, reviewing drafts, recording replies, and configuring providers or PostgreSQL. It also explains the earlier research-only endpoint and shared model-client examples. |
+| [LICENSE](LICENSE) | The full MIT terms for the project's software and documentation, including permissions, required notices, and warranty terms. This is also included in built Python packages. |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Explains how outside contributors set up the project, report problems, make and check changes, and submit pull requests. Its contribution-licensing section says submissions use the project's MIT terms and contributors retain copyright. |
 | [plan.md](plan.md) | Records the development phases, completed work, and next step. |
 | [FILE_GUIDE.md](FILE_GUIDE.md) | This explanation of the project's files and code patterns. |
 
