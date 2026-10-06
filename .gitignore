@@ -1,0 +1,18 @@
+# The local Python environment contains installed packages, not project code.
+.venv/
+# Local model credentials and settings stay outside version control.
+.env
+.env.*
+!.env.example
+# Python and pytest generate these files while importing modules and testing.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+# Local contacts, messages, saved approvals, and execution traces.
+.data/
+# Installing or packaging the project can create these generated directories.
+*.egg-info/
+build/
+dist/
+# macOS creates this folder metadata file.
+.DS_Store

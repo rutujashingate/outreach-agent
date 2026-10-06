@@ -541,6 +541,14 @@ For the complete workflow, read `api/runs.py`, the request/state classes in `mod
 
 ## Keeping this guide current
 
+The repository handoff also tracks `.env.example` and `.gitignore`, which were
+created during the model/storage work but had not been committed. This makes
+the configuration template available in a fresh checkout and preserves the
+rules excluding local credentials and stored application data. `AGENTS.md` now
+records your instruction to commit each verified logical change together with
+its documentation. This is a repository/documentation update, with no change
+to workflow behavior.
+
 This guide is updated together with the code in each phase. When a file or function changes, its explanation should describe what it does, why it is needed, what information it receives, and what it returns. New explanations use plain language and small examples where helpful. Planned features are identified as future work so you can tell what already works.
 
 For every completed phase, update the phase history above with what was built, which files changed, what became possible, and how it was checked.

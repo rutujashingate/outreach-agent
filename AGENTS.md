@@ -9,3 +9,9 @@ Keep `FILE_GUIDE.md` updated alongside every code change. Finish the guide updat
 - Keep the phase history in `FILE_GUIDE.md` current: explain what was built in each phase, which files changed, what became possible, and how it was checked.
 - Clearly distinguish working features from steps planned for a later phase.
 - Keep code comments helpful for a reader learning the project.
+
+# Version control
+
+Commit each completed, verified logical change, including its documentation
+updates. Stage the files belonging to that change. Keep local credentials,
+database files, and generated reports outside commits, following `.gitignore`.
