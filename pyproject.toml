@@ -6,8 +6,8 @@ build-backend = "setuptools.build_meta"
 # Basic project details, including the minimum supported Python version.
 [project]
 name = "outreach-agent"
-version = "0.1.0"
-description = "The application foundation for a goal-driven outreach workflow."
+version = "0.2.0"
+description = "Goal-driven outreach with sourced research, relationship memory, and human approval."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -16,7 +16,14 @@ dependencies = [
     "uvicorn>=0.30,<1",  # Run the web server that serves the FastAPI application.
     "openai>=2.11,<3",  # Make structured model calls through the shared client.
     "langgraph>=1.0,<2",  # Run workflow steps through an explicit state graph.
+    "httpx>=0.27,<1",  # Call search and Gmail through replaceable HTTP adapters.
+    "sqlalchemy>=2.0,<3",  # Store relationship records in SQLite or PostgreSQL.
+    "langgraph-checkpoint-sqlite>=3,<4",  # Resume local runs after a restart.
 ]
+
+# The terminal interface also runs with python -m app.cli.
+[project.scripts]
+outreach = "app.cli:main"
 
 # The extra packages included by pip install -e '.[dev]' support local tests.
 [project.optional-dependencies]
@@ -24,10 +31,17 @@ dev = [
     "pytest>=8,<10",  # Discover and run the automated checks in tests/.
     "httpx>=0.27,<1",  # Support HTTP request simulation in the API tests.
 ]
+postgres = [
+    "psycopg[binary,pool]>=3.2,<4",
+    "langgraph-checkpoint-postgres>=3,<4",
+]
 
 # Include the application and its subpackages when installing the project.
 [tool.setuptools.packages.find]
-include = ["app", "app.*"]
+include = ["app", "app.*", "evals", "evals.*"]
+
+[tool.setuptools.package-data]
+evals = ["cases.json"]
 
 # Look for tests in tests/ and use concise output when running pytest.
 [tool.pytest.ini_options]

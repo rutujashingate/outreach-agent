@@ -1,0 +1,6 @@
+[
+  {"name":"academic", "goal":"Find professors studying AI observability for PhD outreach.", "goal_type":"academic", "target_names":["Example University"], "qualified_names":["Example University"], "sources":["https://example.com/lab"], "hook":"AI observability", "forbidden_claims":["published ten papers"], "max_words":180},
+  {"name":"jobs", "goal":"Find founders hiring Python engineers for job outreach.", "goal_type":"jobs", "target_names":["Example Software"], "qualified_names":["Example Software"], "sources":["https://example.com/jobs"], "hook":"Python engineers", "forbidden_claims":["worked at your company"], "max_words":180},
+  {"name":"sales", "goal":"Find customers who may need API observability.", "goal_type":"sales", "target_names":["Example APIs"], "qualified_names":["Example APIs"], "sources":["https://example.com/apis"], "hook":"API observability", "forbidden_claims":["your systems are failing"], "max_words":180},
+  {"name":"networking", "goal":"Find open-source maintainers to discuss collaboration.", "goal_type":"networking", "target_names":["Example Open Source"], "qualified_names":["Example Open Source"], "sources":["https://example.com/project"], "hook":"open-source collaboration", "forbidden_claims":["we met last week"], "max_words":180}
+]

@@ -5,18 +5,36 @@ import json
 from app.models.client import ModelClient, ModelClientError, ModelResponseError, generate_structured
 from app.models.schemas import OutreachRequest, Prospect, ResearchResult
 from app.prompts.researcher import RESEARCH_INSTRUCTIONS
+from app.models.workflow import OutreachGoal, SearchResult
+from app.tools.search import SearchTool
 
 
 class Researcher:
     """Use the existing model boundary; the caller owns the injected client."""
 
-    def __init__(self, *, client: ModelClient | None = None) -> None:
+    def __init__(self, *, client: ModelClient | None = None, search_tool: SearchTool | None = None) -> None:
         self._client = client
+        self._search_tool = search_tool
+        self.search_enabled = search_tool is not None
+        self.search_results: list[SearchResult] = []
+        self.evidence_material = ""
 
-    async def research(self, *, goal: str, research_material: str = "") -> list[Prospect]:
+    async def research(self, *, goal: str, research_material: str = "",
+                       structured_goal: OutreachGoal | None = None) -> list[Prospect]:
         """Return validated prospects supported by the supplied research notes."""
         # Reuse the request rules for programmatic callers as well as HTTP users.
         request = OutreachRequest(goal=goal, research_material=research_material)
+        self.search_results = []
+        if self._search_tool is not None:
+            query = request.goal if structured_goal is None else " ".join([
+                structured_goal.target_description, *structured_goal.research_signals[:2],
+            ])
+            self.search_results = await self._search_tool.search(query)
+            if self.search_results:
+                # The URL and snippet stay together as supplied evidence.
+                search_notes = json.dumps([item.model_dump() for item in self.search_results], ensure_ascii=False)
+                request.research_material += "\n" + search_notes
+        self.evidence_material = request.research_material
         if not request.research_material.strip():
             # No search is available yet. An empty evidence set yields no facts.
             return []
@@ -25,7 +43,9 @@ class Researcher:
 
         result = await generate_structured(
             instructions=RESEARCH_INSTRUCTIONS,
-            input_text=json.dumps(request.model_dump(), ensure_ascii=False),
+            input_text=json.dumps({**request.model_dump(), **(
+                {"structured_goal": structured_goal.model_dump()} if structured_goal else {}
+            )}, ensure_ascii=False),
             response_model=ResearchResult,
             client=self._client,
         )

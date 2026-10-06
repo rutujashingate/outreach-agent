@@ -1,11 +1,11 @@
-"""Define the expected format of requests and future workflow results.
+"""Define the expected format of requests and workflow results.
 
 Pydantic validates data when these records are created. These classes hold
-information; later workflow components will research, score, and write it.
+information; workflow components research, score, and write it.
 Fields named prospect_id connect their records to a Prospect's id.
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -51,13 +51,16 @@ class OutreachRequest(BaseModel):
 
 
 class Prospect(BaseModel):
-    """Company research with optional details and source references."""
+    """A researched organization or person with supporting source references."""
 
     model_config = ConfigDict(extra="forbid")
 
     # Other result records refer to this ID so they stay linked to the company.
     id: NonEmptyText
     company_name: NonEmptyText
+    # Retain the original field name for existing callers. For person-only
+    # outreach it holds the target's display name, with this explicit type.
+    entity_type: Literal["organization", "person"] = "organization"
     # "| None = None" means this information may be unknown or omitted.
     website: NonEmptyText | None = None
     industry: NonEmptyText | None = None

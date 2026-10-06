@@ -1,12 +1,31 @@
 # Outreach Agent File Guide
 
-This guide explains the files and common code patterns in the application through phase four, including phase 3.5.
+This guide explains the original research path and the complete outreach workflow added through phase 30, including phase 3.5. Each section identifies when the work was added. Optional model routing, concurrency, and advanced retrieval remain disabled or conservative until their conditions are met; live services need your configuration.
+
+V1 now uses a CLI, a menu you interact with in the terminal. Run `python -m app.cli`, or `python -m app.cli --demo` for fictional data without keys. It runs the existing workflow directly. SQLite stores real runs locally; a web UI, Telegram, and WhatsApp are deferred. The optional API still works.
 
 The key distinction is: **schemas define the data format, state holds one request's data, the graph controls execution, and the workflow function connects the application to the graph.**
 
+Some terms used below:
+
+| Term | Plain meaning |
+|---|---|
+| CLI / terminal | A program you interact with by typing answers or commands in a text window. |
+| API endpoint | An address another program calls to submit or read information. |
+| Schema / record | A description of allowed fields, and a validated collection of values following that description. |
+| Graph / node | Connected workflow steps, and one step within that workflow. |
+| SDK / client | A provider's software library, and the object our code uses to request a response. A fake client supplies local examples. |
+| Repository | Functions that read and write stored application information. |
+| SQLite / PostgreSQL | A database in a local file, or a database running as a service. |
+| Checkpoint | Saved progress for one workflow so it can resume later. |
+| Hash / fingerprint | A code calculated from the actual message content, used to recognize an unchanged or repeated message. |
+| MIME | The standard format used to put an email's headers and body together. |
+| Embedding / semantic retrieval | Numbers representing text, and searching by similarity of meaning. These are optional here. |
+| Subgraph | A group of workflow steps kept together inside a larger workflow. |
+
 ## What we built in each phase
 
-Phases one, two, three, 3.5, and four are complete. Each phase adds a building block for the next one.
+The first sections record phases one through four, including phase 3.5. The next table describes the implemented work through phase 30 and the optional features that still need configuration or measurements.
 
 ### Phase 1: Build the application foundation
 
@@ -79,19 +98,108 @@ We added a researcher and connected it to LangGraph. The graph now runs `START �
 
 Both README fake-client examples were run successfully, including the complete graph example returning an academic prospect with its supplied source. The fake examples check the program's behavior and do not perform actual research. The researcher checks names and source references against the supplied text, but does not verify websites or prove every statement's accuracy. Search, qualification, writing, reviews, memory, approvals, and Gmail remain later work.
 
+### Phases 5 to 30: Add the complete outreach workflow
+
+We implemented the remaining workflow after your request to build all phases. The original `POST /outreach` research endpoint still works. The new `POST /runs` endpoint uses the complete graph and returns a saved run that can pause for approval. We extended the existing project, schemas, and model client.
+
+| Phase | What we added | Main files | What the checks cover |
+|---|---|---|---|
+| 5 | Replaceable search with typed text and URLs, connected to the researcher. | `tools/search.py`, `agents/researcher.py`, `nodes/discovery.py` | Queries, preserved references, fake results, and provider failures. |
+| 6 | Qualification and an explicit score threshold of 70. | `qualification/qualifier.py`, `nodes/qualification.py` | Scores, prospect associations, selection, and rejected results. |
+| 7 | Routes for no matches, eligible contacts, review decisions, and approval. | `orchestration/routing.py`, `full_graph.py` | Empty results end and eligible results reach the correct next step. |
+| 8 | Shared goal interpretation for jobs, academics, sales, networking, and other categories. Added `entity_type` for person-only targets. | `agents/goal_interpreter.py`, `models/workflow.py`, `schemas.py`, `prompts/goal.py` | Original goals survive; different categories work; person targets have an explicit type. |
+| 9 | Relationship facts, contacts, interaction history, and portable database tables. | `memory/`, `db/` | Saved facts survive a new repository and remain separate by contact; tables compile for PostgreSQL. |
+| 10 | Relevant memory retrieval and optional Gmail-history ingestion. | `memory/retrieval.py`, `nodes/memory.py` | Old, expired, unrelated, and other-contact information is excluded. |
+| 11 | Deterministic contact rules and duplicate-contact checks. | `security/contact_policy.py`, `nodes/contact.py` | Opt-outs, active conversations, recent contact, timing, missing addresses, and pending actions block outreach. |
+| 12 | A grounded message strategy using goal, evidence, sender background, and memory. | `strategy/builder.py`, `nodes/strategy.py`, `prompts/strategy.py` | Correct prospect associations and context passed to strategy. |
+| 13 | Subject/body writing and revisions using supplied context. | `agents/writer.py`, `nodes/writing.py`, `prompts/writer.py` | Typed drafts, ID checks, and rejection of header line breaks. |
+| 14 | Automated review against the research, strategy, and relationship context. | `agents/reviewer.py`, `nodes/review.py`, `prompts/reviewer.py` | Review records, scores from 0 to 1, and feedback. Model quality still needs actual evaluations. |
+| 15 | A hard revision limit, initially one revision, shared by automatic rewrites and human edits. | `nodes/writing.py`, `nodes/review.py`, `nodes/approval.py` | Rejection can lead to revision; exhaustion stops for manual review. |
+| 16 | In-memory, durable SQLite, and optional PostgreSQL checkpoints. | `orchestration/checkpoints.py`, `runs.py` | A paused run resumes after closing and reopening its SQLite checkpointer. |
+| 17 | A pause showing the prospect, evidence, memory, strategy, recipient, and draft. | `nodes/approval.py`, `models/workflow.py` | Nothing reaches Gmail before human approval; changed content needs a new approval. |
+| 18 | Saved-run, decision, event, and retry endpoints. | `api/runs.py`, `api/approvals.py`, `orchestration/runs.py` | Existing runs resume; unknown IDs, stale decisions, and concurrent resumes are rejected. |
+| 19 | Gmail thread search and reading through a replaceable HTTP adapter. | `tools/gmail.py`, `nodes/memory.py` | HTTP requests, plain-text decoding, exact contact matching, and source identifiers. |
+| 20 | Gmail draft creation after review and human approval. | `tools/gmail.py`, `nodes/external.py` | Approved content reaches a fake draft operation once. |
+| 21 | A guarded sending path and persistent protection against duplicate actions. Sending is disabled by default. | `nodes/external.py`, `memory/repository.py`, `security/contact_policy.py` | Approval/version checks, a second policy check, replay protection, and uncertain responses. Every send test uses a fake. |
+| 22 | Outcome records and source-backed memory extraction. | `nodes/external.py`, `memory/extraction.py`, `memory/repository.py` | Drafted, sent, blocked, rejected, failed, and uncertain outcomes remain distinct. Unsupported quotes are rejected. |
+| 23 | A separate reply workflow and a reply API. | `orchestration/replies.py`, `api/memory.py` | Reply categories, explicit opt-outs, timing, source retention, and duplicate processing. No automatic follow-ups. |
+| 24 | Execution events for steps, routes, calls, timing, token usage when available, pauses, resumes, and external actions. | `observability.py`, `orchestration/context.py`, `full_graph.py` | Events can explain the path a prospect took. |
+| 25 | Four reference goal cases, component scoring, and an evaluation command. | `evals/cases.json`, `scoring.py`, `run.py` | Simulation exercises the workflow; deliberate regressions lower scores. Live model evaluation is a separate opt-in. |
+| 26 | An optional model router that requires recorded measurements for each route. | `models/router.py` | Unmeasured or inadequate routes are rejected. No production model optimization has been selected. |
+| 27 | Shared limits, timeouts, estimated cost reservations, bounded retries, request limits, API-key protection, and action/run locks. | `security/limits.py`, `settings.py`, `api/dependencies.py`, `orchestration/context.py`, `memory/repository.py` | Budgets persist across resume/retry, timeouts stop work, and simultaneous actions are constrained. |
+| 28 | Bounded concurrent processing in prospect components. The default is one prospect operation at a time. | `nodes/common.py`, `security/limits.py` | Overlapping work keeps results attached to the right prospect and respects the configured concurrency. |
+| 29 | Duplicate-memory consolidation, possible-conflict views, and optional semantic retrieval with an injected embedding function. | `memory/advanced.py`, `api/memory.py`, `nodes/memory.py` | Sources survive consolidation; fake vectors can improve a vocabulary mismatch. No vector database is enabled. |
+| 30 | Separate research and message-preparation subgraphs, plus an inbound reply graph. | `orchestration/full_graph.py`, `replies.py` | They connect through the complete workflow while preserving revision and approval behavior. |
+
+**What works now:** a complete run can interpret a goal, research supplied or searched evidence, qualify prospects, check memory and contact rules, prepare and review drafts, pause for a person, and record approved actions. All **360 tests pass**, including the original 233 checks, Groq coverage, and the V1 CLI checks. The earlier full-workflow installation in a fresh Python environment, the fictional demo, and actual local HTTP requests also passed. The detailed results are recorded in [plan.md](plan.md#complete-workflow-verification).
+
+**What still needs configuration or measurement:** real Groq or OpenAI, Brave, Gmail, and PostgreSQL access are optional integrations requiring your settings. They were checked with local substitutes rather than live accounts. Sending requires explicit enablement plus approval of the current content. Real model-quality measurements, production model choices, external embeddings, and a vector database have not been configured. The cost control reserves a configured estimate per model attempt; it is not a guarantee of the provider's final bill.
+
+### Provider update after phase 30: Use Groq
+
+You chose Groq as the model provider. We extended the phase-three client boundary and the configuration used by phases 4–30, while keeping the same goals, records, graph, and approval rules.
+
+- Added `app/models/groq_client.py`. It sends the requested record format to Groq, checks the returned JSON, reports failed/refused/incomplete output, and records token usage. It uses the already-installed HTTPX package.
+- Updated `app/settings.py` to read `OUTREACH_MODEL_PROVIDER`. Updated `app/orchestration/runs.py` and `app/api/outreach.py` to use the selected provider. The full workflow creates its real client only when a model call is needed, so approval alone does not make another model call.
+- Updated `.env.example` to select Groq and show `GROQ_API_KEY` and `GROQ_MODEL`. Existing installations keep the OpenAI default unless they explicitly select Groq.
+- Updated `evals/run.py` so an explicitly requested live evaluation also uses your selected provider. Default evaluations remain local simulations.
+- Added `tests/test_groq_client.py` for Groq request/response handling, errors, connection ownership, provider selection, research, complete runs, approval, and evaluation selection. These checks use local responses, not a real Groq account.
+- Updated `tests/conftest.py` so tests use isolated settings and temporary data even when your shell has real account settings. Each test can explicitly supply the settings it needs.
+- Added README explanations of each credential, startup, and the interface choices. A custom UI, Telegram bot, and WhatsApp adapter remain proposed work; `/docs` is the available browser interface today.
+
+`GroqModelClient.from_env()` reads your key and model name. `generate_structured(instructions, input_text, response_model)` sends those instructions and the expected format to Groq, then returns the validated record. For example, requesting `Qualification` returns a prospect ID, score, selection decision, and reasons. `aclose()` closes a connection this client created. Best-effort JSON schema allows our existing optional fields; invalid records stop before they can be used.
+
+**Checks:** the full suite now passes 343 tests, including 24 added provider checks. The original OpenAI behavior still passes. No live Groq requests were made, and the HTTPX dependency was already installed.
+
 ### Documentation updates between phases
 
-After phase two, we added comments and explanations to help you read the code, then collected the file explanations in this guide. Phase three added the model-client explanations. We later added `AGENTS.md` to instruct coding assistants to keep this guide updated alongside the code. Phase 3.5 adds graph explanations and updates the phase history to reflect the new orchestration choice.
+After phase two, we collected the file explanations in this guide. Later phases added comments, model-client explanations, graph history, and researcher explanations. After phase four we first expanded the roadmap without adding code. Your clarification led to the complete workflow implementation described above. This guide, the README, and the plan now describe that code and distinguish it from optional integrations or later refinements.
 
-### Next: Phase 5, the search tool
+### V1 interface follow-up: Interact through the CLI
 
-Phase five is planned. It will give the researcher an injectable search tool that returns typed results with source references. Qualification follows in phase six, and conditional routing in phase seven.
+You chose the terminal for V1 so we can try real goals and configured keys before building other interfaces. This reuses the existing work: phase 3's model client, phase 9's relationship database, phase 16's saved progress, phases 17–18's approval flow, and phase 27's limits/recovery.
 
-At present, `POST /outreach` returns `research_complete`. With supplied material and a configured client it can return prospects. A goal alone has no evidence to research and returns empty prospects without a model call.
+- Added `app/cli.py`. Its menu collects a goal, sender background, research notes or a search choice, and recipient addresses. It shows prospects, scores, drafts, outcomes, and execution events. It can approve, reject, edit, leave work paused, or retry a failed run. It builds the required decision IDs and versions internally.
+- Added `app/orchestration/runtime.py` and updated `app/main.py`. The terminal and API now open the same database, checkpoint, and tool services through one helper. Exiting closes those connections; starting the terminal requires no HTTP server.
+- Updated `app/memory/repository.py` with a bounded list of saved outreach runs. Reply-processing budget records are excluded. This changes queries, not the database table format.
+- Updated `app/orchestration/runs.py` so cancelling active execution marks it failed, releases its run lock, and allows inspection/retry from saved progress. Existing budgets still apply. A hard process kill can leave a lock until its lease expires.
+- Updated `pyproject.toml` to register the `outreach` command. `python -m app.cli` also works without using that shortcut. No new software package is needed.
+- Added `tests/test_cli.py`. It checks terminal input, validation before model calls, approval/rejection/editing, leaving a whole decision batch paused, fake draft creation, saved-run lookup, events, secret-free configuration output, interrupted execution, and real SQLite restart/resume.
+- Updated the README and plan to make CLI the V1 interface and defer web/Telegram/WhatsApp work. The existing automated demo and API remain available.
+
+The `--demo` option uses temporary fictional records and fake clients; its records disappear on exit. The normal CLI uses the SQLite files described below. `--check-config` only checks whether settings are present. It does not authenticate keys or call providers.
+
+**Checks:** all 360 tests pass, including 17 new CLI checks. We also installed the console command and ran actual terminal processes: the interactive fictional goal reached approval and a fake draft, execution events printed, normal startup created both SQLite files, a missing Groq key returned the expected configuration-check result, and `outreach --help` worked. No live provider call or Gmail write was made.
+
+#### Main CLI functions
+
+The main terminal functions have these inputs and outputs:
+
+| Function | What goes in | What comes out |
+|---|---|---|
+| `collect_request` | Answers typed by the user: goal, background, evidence, addresses, and action. | A validated `WorkflowRequest` for the existing manager. |
+| `show_run` | A `RunResponse` returned by the manager. | Printed progress, prospects, drafts, outcomes, and failures. |
+| `review_run` | The manager, a run ID, and approve/reject/edit/later answers. | The resumed result, or no submission when the user chooses later. |
+| `show_configuration` | The selected settings and exported environment variables. | Printed presence labels without secret values, and whether required model settings are present. |
+| `interact` | A manager and terminal answers. | A running menu until the user exits; results are saved by the existing workflow. |
+| `main` | Optional `--demo` or `--check-config` arguments. | Starts the appropriate interface and returns an exit code. |
+| `open_runtime` | Optional application settings. | A ready manager while the context is open; connections close on exit. |
+| `Repository.list_runs` | An optional limit, between 1 and 100. | Saved outreach IDs, goals, statuses, and progress, sorted by identifier. |
+
+#### The V1 database
+
+SQLite keeps data in ordinary files on your computer. SQLAlchemy is the Python helper used to read and write relationship records. You need no database API key, account, password, or separately running database server.
+
+| File | What is saved there |
+|---|---|
+| `.data/relationships.sqlite3` | Contact history, facts and sources, contact rules, action/outcome records, run summaries, call counters, and execution events. |
+| `.data/checkpoints.sqlite3` | Workflow progress so a paused or failed execution can resume later. |
+
+These files are created automatically when the normal runtime opens. They are separate because relationship history can help later goals, while a checkpoint belongs to one execution. The CLI and API share them when they use the same project folder and settings. `OUTREACH_DATA_DIR` changes the local location. PostgreSQL remains an optional deployment choice; V1 uses SQLite by default.
 
 ## How a request moves through the application
 
-When you submit a goal, this happens:
+The original `POST /outreach` endpoint follows this research-only path:
 
 ```mermaid
 flowchart LR
@@ -106,26 +214,133 @@ flowchart LR
 
 FastAPI uses the rules in `schemas.py` to check the request. The endpoint creates a fresh state and waits for `run_workflow`. That function runs the graph and returns its result as an `OutreachState`, which the endpoint returns as JSON.
 
-The application currently researches supplied material and returns structured prospects. The research component uses phase three's shared model client. Qualification and email-writing components will be added later.
+The complete `POST /runs` path uses the same model boundary and extends the original state with saved-run information:
+
+```mermaid
+flowchart TD
+    A["Goal and evidence"] --> B["Interpret, research, qualify"]
+    B --> C{"Any qualified prospects?"}
+    C -->|No| Z["Record completion"]
+    C -->|Yes| D["Retrieve relevant memory"]
+    D --> E{"Contact rules allow outreach?"}
+    E -->|No| Z
+    E -->|Yes| F["Strategy, draft, review"]
+    F --> G{"Review approved?"}
+    G -->|Revise within limit| F
+    G -->|Limit reached| Z
+    G -->|Yes| H["Pause for your decision"]
+    H -->|Edit within limit| F
+    H -->|Reject| Z
+    H -->|Approve| I["Recheck contact rules and approval"]
+    I --> J["Requested action: none, Gmail draft, or enabled send"]
+    J --> Z
+```
+
+A checkpoint saves the paused execution. `POST /runs/{run_id}/decisions` resumes that execution. Relationship memory belongs to contacts across requests; it is separate from the saved progress of one run.
 
 ## The application files
 
 | File | Phase work | What it does |
 |---|---|---|
-| [app/main.py](app/main.py) | Phase 1: application setup | Creates the FastAPI application and connects its endpoints. Uvicorn loads this application when you start the server. |
+| [app/cli.py](app/cli.py) | V1 interface follow-up; reuses phases 3/9/16–18/27 | Presents ordinary terminal questions and a saved-run menu. Runs the manager directly and submits decisions for the current draft. Offers a fictional demo and a local configuration-presence check. |
+| [app/main.py](app/main.py) | Phase 1; expanded in phases 16–27 and the V1 follow-up | Connects all endpoints and uses the shared runtime to open/close services. Translates known failures into useful HTTP responses. |
 | [app/api/outreach.py](app/api/outreach.py) | Phase 1: request handling; phase 4: supplied material and client dependency | Receives the validated goal and optional material, creates a fresh state, calls the workflow, and returns its result. Provides and closes a real client for requests with evidence. |
-| [app/models/schemas.py](app/models/schemas.py) | Phase 1: goal rules; phase 2: five result formats; phase 4: research input and batch | Defines what information each record contains and checks that incoming data follows those rules. |
-| [app/models/client.py](app/models/client.py) | Phase 3: shared model calls | Provides one function for requesting structured model output, validates the result, and supplies real and fake clients. |
-| [app/agents/researcher.py](app/agents/researcher.py) | Phase 4: research component | Requests a batch of prospects through the existing model client and checks distinct IDs, names, and source references. |
+| [app/models/schemas.py](app/models/schemas.py) | Phases 1–4; phase 8: person or organization targets | Defines what information each record contains and checks that incoming data follows those rules. |
+| [app/models/client.py](app/models/client.py) | Phase 3; phases 24/27: usage and output limits | Provides one function for requesting structured model output, validates the result, and supplies real and fake clients. |
+| [app/models/groq_client.py](app/models/groq_client.py) | Provider update after phase 30; extends phase 3 | Implements the same model interface using Groq Chat Completions and the existing record formats. Converts Groq token counts into the event format and owns only connections it creates. |
+| [app/agents/researcher.py](app/agents/researcher.py) | Phase 4; phases 5/8: search and interpreted goals | Requests a batch of prospects through the existing model client and checks distinct IDs, names, and source references. |
 | [app/prompts/researcher.py](app/prompts/researcher.py) | Phase 4: research instructions | Explains the research task to the model, including evidence rules and which later-stage tasks to leave alone. |
 | [app/orchestration/nodes/research.py](app/orchestration/nodes/research.py) | Phase 4: graph adapter | Holds per-request context, calls the researcher with the goal and material, and returns only research-related updates. |
 | [app/orchestration/state.py](app/orchestration/state.py) | Phases 1–2: request and results; phase 4: progress label | Holds one request's goal, progress, and results together. Each request gets its own state. |
 | [app/orchestration/graph.py](app/orchestration/graph.py) | Phase 3.5: graph engine; phase 4: research path | Builds and compiles `START → research → END` using the existing state and per-request context. |
 | [app/orchestration/workflow.py](app/orchestration/workflow.py) | Phase 1: coordinator; phase 3.5: graph connection; phase 4: injected research inputs | Keeps `run_workflow(state)` available and accepts optional researcher and material arguments. Validates the graph result and updates and returns the supplied record. |
 
+## Files added for the complete workflow
+
+Paths in this table are actual files in the repository. The phase column explains when their responsibility was introduced.
+
+| File | Phase | What it means and how it connects |
+|---|---|---|
+| [app/models/workflow.py](app/models/workflow.py) | 8–23 | Defines interpreted goals, search results, sender/recipient details, sourced memories, approval decisions, outcomes, replies, and `WorkflowState`, which extends `OutreachState`. |
+| [app/agents/goal_interpreter.py](app/agents/goal_interpreter.py) | 8 | Takes the original goal and returns its structured interpretation through the model client. Rejects output that changes the original sentence. |
+| [app/prompts/goal.py](app/prompts/goal.py) | 8 | Instructions for identifying purpose, target, constraints, and desired outcome without inventing context. |
+| [app/qualification/qualifier.py](app/qualification/qualifier.py) | 6 | Takes an interpreted goal and prospect, obtains a score and reasons, and sets selection using the code threshold of 70. |
+| [app/prompts/qualification.py](app/prompts/qualification.py) | 6 | Explains the relevance assessment and evidence rules to the model. |
+| [app/strategy/builder.py](app/strategy/builder.py) | 12 | Turns a goal, prospect, relevant memories, and sender background into a message approach. |
+| [app/prompts/strategy.py](app/prompts/strategy.py) | 12 | Explains why to contact someone, personalization, hypotheses, offered value, and the requested response. |
+| [app/agents/writer.py](app/agents/writer.py) | 13/15 | Takes the supplied context and optional previous draft/feedback; returns an `EmailDraft` for the same prospect. |
+| [app/prompts/writer.py](app/prompts/writer.py) | 13 | Instructions for concise, supported messages and revisions. |
+| [app/agents/reviewer.py](app/agents/reviewer.py) | 14 | Takes evidence, memory, strategy, sender, and draft; returns a review for the correct prospect, with a score from 0 to 1. |
+| [app/prompts/reviewer.py](app/prompts/reviewer.py) | 14 | Instructions for checking claims, personalization, tone, length, and relationship contradictions. |
+| [app/tools/search.py](app/tools/search.py) | 5 | Defines the search interface, a fake, and the Brave HTTP adapter. Receives a query and returns typed text/URL results. |
+| [app/tools/gmail.py](app/tools/gmail.py) | 19–21 | Reads threads, decodes text, builds email messages, and creates or sends messages when the graph allows it. Also provides a fake that only records calls. |
+| [app/db/database.py](app/db/database.py) | 9 | Opens SQLite or PostgreSQL through SQLAlchemy and creates the initial tables. Later schema changes need explicit migrations. |
+| [app/db/models.py](app/db/models.py) | 9/21/24/27 | Defines contact, memory, interaction, action, run, contact-lock, and event tables. Contact/run indexes support lookups. |
+| [app/memory/schemas.py](app/memory/schemas.py) | 9 | Re-exports shared memory record classes so there is one definition of their format. |
+| [app/memory/repository.py](app/memory/repository.py) | 9/21/22/27 | Reads/writes facts and history, records external actions, saves API snapshots, counts requests, and claims run/contact locks. Database transactions finish before network calls. |
+| [app/memory/retrieval.py](app/memory/retrieval.py) | 10 | Finds recent, relevant facts for one email address. Expired ordinary facts are excluded; opt-outs do not disappear with age. |
+| [app/memory/extraction.py](app/memory/extraction.py) | 9/22 | Checks literal evidence quotes and stores those quotes as fact values. Explicit unsubscribe phrases are recorded before model access. |
+| [app/memory/advanced.py](app/memory/advanced.py) | 29 | Groups identical memories while keeping their sources, flags possible negation conflicts, and optionally ranks with supplied embeddings after a measured reason is provided. |
+| [app/security/contact_policy.py](app/security/contact_policy.py) | 11/21 | Applies contact rules in code. Also calculates the content hash tying approval to sender, recipient, subject, and body. |
+| [app/security/limits.py](app/security/limits.py) | 15/27/28 | Defines bounded revisions, calls, results, timeouts, estimated costs, and concurrency. |
+| [app/models/router.py](app/models/router.py) | 26 | Optionally chooses a client by requested record class. Each configured route needs a quality/cost/time measurement. Otherwise the default client is used. |
+| [app/settings.py](app/settings.py) | 16–27 | Reads explicit environment settings. Sending is off, search is opt-in, and local SQLite checkpoints are the defaults. |
+| [app/observability.py](app/observability.py) | 24 | Saves and retrieves execution events by run ID without storing credentials or full model prompts. |
+| [app/orchestration/context.py](app/orchestration/context.py) | 24/27/28 | Supplies per-invocation clients/tools and wraps model/search calls with counting, timeouts, events, and bounded recovery. |
+| [app/orchestration/checkpoints.py](app/orchestration/checkpoints.py) | 16 | Selects in-memory, SQLite, or PostgreSQL checkpoint storage. Explicitly allows our record types in serialization and disables pickle fallback. |
+| [app/orchestration/full_graph.py](app/orchestration/full_graph.py) | 7–30 | Builds the complete graph and its research/outreach subgraphs. It records node timing and selected routes. |
+| [app/orchestration/routing.py](app/orchestration/routing.py) | 7/11/15/17 | Small code functions choose the next step from the actual results. |
+| [app/orchestration/runs.py](app/orchestration/runs.py) | 16–18/27 | `RunManager` starts, inspects, resumes, and retries identified executions. Calls and budgets persist across those operations. |
+| [app/orchestration/runtime.py](app/orchestration/runtime.py) | V1 follow-up; shares phases 9/16/19/27 services | Opens the database, checkpoint storage, and optional search/Gmail clients for the terminal or API; closes them together when the caller exits. |
+| [app/orchestration/replies.py](app/orchestration/replies.py) | 23/30 | Runs a separate classify/extract/update workflow for incoming replies. Reprocessing the same source returns its recorded result. |
+| [app/api/runs.py](app/api/runs.py) | 18/24 | HTTP endpoints to create, inspect, retry, and read events for a complete run. |
+| [app/api/approvals.py](app/api/approvals.py) | 18 | Receives approve/reject/edit decisions and resumes the existing saved run. |
+| [app/api/memory.py](app/api/memory.py) | 22/23/29 | Receives replies, shows contact history and consolidated facts, and accepts sourced manual changes to conversation/timing settings. It cannot clear an opt-out. |
+| [app/api/dependencies.py](app/api/dependencies.py) | 27 | Checks the optional API key and per-process request limit, and supplies the configured manager to endpoints. |
+| [app/demo.py](app/demo.py) | Complete-flow verification | Provides a fictional client and fake tools for a runnable CLI/API demonstration. It creates no real emails or Gmail drafts. |
+| [evals/cases.json](evals/cases.json) | 25 | Four reference examples: academic, job, sales, and networking goals, expected targets, sources, and writing constraints. |
+| [evals/scoring.py](evals/scoring.py) | 25 | Compares a run with its reference and reports component scores. Missing drafts and deliberate regressions lower the appropriate scores. |
+| [evals/run.py](evals/run.py) | 25 | Runs the examples locally by default; `--live` explicitly opts into the configured model while Gmail remains unused. |
+
+## Main complete-workflow functions
+
+| Function | What it receives | What it returns or changes |
+|---|---|---|
+| `RunManager.start` | A validated `WorkflowRequest` | A new run, its results, and whether it is waiting for approval. |
+| `RunManager.get` | A run ID | The stored state, approval status, and any execution error. |
+| `RunManager.resume` | A run ID and decisions for all pending drafts | Continues the same checkpointed run; it may finish or pause again after an edit. |
+| `RunManager.retry` | A failed run ID | Continues from its failed checkpoint; previous call/cost counters still apply. |
+| `RunManager.execution_events` | A run ID | The recorded execution events used to explain what happened. |
+| `build_full_graph` | A checkpointer | A compiled graph ready to execute the complete workflow. |
+| `interpret_goal` / `qualify` / `build_strategy` / `write_draft` / `review_draft` | Their typed goal/prospect/context inputs and a model client | A validated record for the intended goal or prospect. |
+| `retrieve` | Repository, email, goal, and limits | A small list of relevant sourced memories for that contact. |
+| `check_contact` | Repository, recipient, limits, and optional current time | An allow/block decision with reasons; no model is called. |
+| `message_fingerprint` | Sender, recipient, and draft | A hash representing the exact content approved by the user. |
+| `extract_memories` | A contact, message source/text, repository, and client | Facts using exact evidence quotes, stored with their source. |
+| `process_reply` | Manager and sourced incoming reply | The category and extracted facts; contact rules/history are updated. |
+| `semantic_retrieve` | Contact/goal/limits, an embedding function, and a measured reason | Optional ranked memories; no embedding provider is selected automatically. |
+
+## The complete-workflow node files
+
+Nodes are adapters between saved state and business components. Each returns only the fields it changed; LangGraph combines those updates with existing state. Individual component failures are recorded with the prospect ID, stage, and error type so another prospect's results remain usable.
+
+| File | Phase | What the node does |
+|---|---|---|
+| [nodes/common.py](app/orchestration/nodes/common.py) | 28 | Runs bounded per-prospect operations, joins each result to its prospect, and represents failures without mixing records. |
+| [nodes/goal.py](app/orchestration/nodes/goal.py) | 8 | Stores the shared goal interpretation. |
+| [nodes/discovery.py](app/orchestration/nodes/discovery.py) | 5/8 | Connects search/material to the researcher, applies the prospect limit, and resolves explicitly supplied recipient mappings. |
+| [nodes/qualification.py](app/orchestration/nodes/qualification.py) | 6 | Retains all scores/reasons, ranks selected prospects, and applies the qualified-result limit. |
+| [nodes/memory.py](app/orchestration/nodes/memory.py) | 10/19/29 | Retrieves relevant facts, optionally ingests a bounded amount of Gmail history, and checks that retrieved facts belong to the intended contact. |
+| [nodes/contact.py](app/orchestration/nodes/contact.py) | 11 | Applies contact rules and blocks a repeated recipient within the run. |
+| [nodes/strategy.py](app/orchestration/nodes/strategy.py) | 12 | Stores strategies for allowed prospects. Existing strategies are retained during revision. |
+| [nodes/writing.py](app/orchestration/nodes/writing.py) | 13/15 | Writes missing or rejected drafts and tracks versions/revision counts. |
+| [nodes/review.py](app/orchestration/nodes/review.py) | 14/15 | Reviews new/revised drafts and marks exhausted revisions for manual review. |
+| [nodes/approval.py](app/orchestration/nodes/approval.py) | 17/18 | Creates visible approval records, interrupts execution, validates decisions, and invalidates old approval after edits. |
+| [nodes/external.py](app/orchestration/nodes/external.py) | 20–22 | Rechecks eligibility and exact approval, claims an action/contact lock, performs the requested action once, and records outcomes. Unknown external results stay uncertain and require inspection. |
+
 ## How graph.py and workflow.py work together
 
-A graph is a set of steps connected by paths. A **node** performs one step; an **edge** says which step follows it. Our graph currently has one node, `research`, between the start and finish.
+A graph is a set of steps connected by paths. A **node** performs one step; an **edge** says which step follows it. The compatibility research graph has one node, `research`, between the start and finish. `full_graph.py` defines the complete workflow separately while reusing the application components.
 
 | Name | What it receives | What it produces |
 |---|---|---|
@@ -136,7 +351,7 @@ A graph is a set of steps connected by paths. A **node** performs one step; an *
 
 LangGraph returns its result as a dictionary, so `run_workflow` first checks it with `OutreachState.model_validate`. It then copies each validated field into the original record. A failed invocation or invalid result raises an error before this copying begins.
 
-The graph controls execution. The researcher performs research, and the existing model client handles its model request. Qualification and writing components remain later work.
+The graph controls execution. The researcher performs research, and the existing model client handles its model request. The complete graph also connects qualification, strategy, writing, review, and approval.
 
 ## How the researcher works
 
@@ -146,13 +361,13 @@ For example, notes might name Example University, Professor Ada Lin, wearable AI
 
 The component checks that IDs are distinct, names appear in the material without regard to capitalization, and source references occur in the material. The prompt requests supported facts and keeps instructions inside the material separate from the research task. These checks do not prove every claim is true or that a prospect fits the goal; later qualification, review, and evaluation steps will add their own checks.
 
-Blank material returns an empty list without a model call. When the node receives no new material, it leaves existing prospects in state intact and updates only progress. If new material produces no matches, it replaces the prospect list with an empty list.
+With no material and no injected search tool, research returns an empty list without a model call. When a search tool is supplied, the researcher builds a query from the raw or interpreted goal and adds typed results to its evidence, preserving URLs. When the node receives no new material, it leaves existing prospects in state intact and updates only progress. If new material produces no matches, it replaces the prospect list with an empty list.
 
 `ResearchContext` keeps the researcher and material outside `OutreachState`. LangGraph passes it to the node for that invocation, so concurrent requests can use different clients and evidence without sharing them.
 
 ## How the API provides a model client
 
-`get_research_client` in `app/api/outreach.py` is a FastAPI dependency: a helper FastAPI calls to supply the endpoint with a client. It receives the validated request. With blank material, it supplies `None`. With material, it creates `OpenAIModelClient` from exported settings and closes it after success or failure.
+`get_research_client` in `app/api/outreach.py` is a FastAPI dependency: a helper FastAPI calls to supply the endpoint with a client. It receives the validated request and access to the running application's settings. With blank material, it supplies `None`. With material, it creates `GroqModelClient` or `OpenAIModelClient` according to the selected provider and closes it after success or failure.
 
 Tests replace this helper through `app.dependency_overrides` and supply a `FakeModelClient`. Missing settings return `503`; failed requests, refusals, invalid output, and failed evidence checks return `502`. Invalid request input continues to return `422` before client creation.
 
@@ -163,14 +378,14 @@ Each class represents a different kind of record:
 | Class | Meaning |
 |---|---|
 | `OutreachRequest` | The user's required goal and optional text containing research material. |
-| `Prospect` | A potential outreach target, represented by an organization, optional person details, useful signals, and source references. |
+| `Prospect` | A potential outreach target, represented by an organization or person, useful signals, and source references. `entity_type` makes person-only targets explicit; `company_name` remains the legacy display-name field. |
 | `ResearchResult` | The model's research response: a wrapper containing a list of existing prospect records. |
 | `Qualification` | A prospect's score, selection decision, and reasons. |
-| `OutreachStrategy` | Why to contact the prospect, how the product could help, and what action to suggest. |
+| `OutreachStrategy` | Why to contact the prospect, the relevant contribution or connection, an explicitly tentative hypothesis, and the response to ask for. |
 | `EmailDraft` | The email subject and body for a prospect. |
 | `ReviewResult` | The reviewer's decision, score, and feedback about a draft. |
 
-These classes **store and validate information**. The researcher now produces prospects. The qualifier, writer, and reviewer will produce their results in later phases.
+These classes **store and validate information**. The researcher, qualifier, strategy builder, writer, and reviewer now produce their respective records through the shared client.
 
 For example, a prospect might have ID `"p1"`. Its qualification, strategy, draft, and review all use `prospect_id="p1"` to refer to that company.
 
@@ -199,7 +414,7 @@ The file contains these supporting pieces:
 | `ModelResponseError` | Reports missing, incomplete, or invalid output. It is a kind of `ModelClientError`. |
 | `ModelRefusalError` | Reports that the model refused the request. It is a kind of `ModelResponseError`. |
 
-The shared function checks output from both clients against the same record rules. This lets future agents use a fake during tests and a real client when running with configured credentials. The README includes an example you can run using the fake.
+The shared function checks output from all clients against the same record rules. `GroqModelClient`, in its separate file, also follows this interface. This lets components use a fake during tests and a real client with configured credentials. The README includes an example you can run using the fake.
 
 ## Installation and documentation files
 
@@ -207,8 +422,8 @@ The shared function checks output from both clients against the same record rule
 |---|---|
 | [AGENTS.md](AGENTS.md) | Gives coding assistants the project's documentation instructions, including updating this guide whenever the code changes. |
 | [pyproject.toml](pyproject.toml) | Lists the project's required packages, supported Python version, installation settings, and test settings. |
-| [.env.example](.env.example) | Lists the optional `OPENAI_API_KEY` and `OPENAI_MODEL` settings with empty values. Copy it locally and export the completed settings before using the real client. |
-| [.gitignore](.gitignore) | Tells Git to ignore installed packages, generated files, and local credential files such as `.env`. |
+| [.env.example](.env.example) | Lists model, search, Gmail, database, checkpoint, API-key, and limit settings. Copy it locally and explicitly export the settings you need; copying alone does not load them. |
+| [.gitignore](.gitignore) | Tells Git to ignore installed packages, generated files, local credential files, and `.data/`, which holds private local records and checkpoints. |
 | [README.md](README.md) | Instructions for installing, starting, testing, and understanding the application. |
 | [plan.md](plan.md) | Records the development phases, completed work, and next step. |
 | [FILE_GUIDE.md](FILE_GUIDE.md) | This explanation of the project's files and code patterns. |
@@ -224,6 +439,8 @@ The `__init__.py` files organize the Python packages:
 - [app/models/__init__.py](app/models/__init__.py): the structured records and model-client package.
 - [app/orchestration/__init__.py](app/orchestration/__init__.py): the state and workflow package.
 - [app/orchestration/nodes/__init__.py](app/orchestration/nodes/__init__.py): adapters between components and graph state.
+
+The complete workflow also adds package markers for [tools](app/tools/__init__.py), [qualification](app/qualification/__init__.py), [strategy](app/strategy/__init__.py), [memory](app/memory/__init__.py), [database access](app/db/__init__.py), [security rules](app/security/__init__.py), and [evaluations](evals/__init__.py).
 
 These files make it possible to organize imports using package paths such as `app.models.schemas`.
 
@@ -242,6 +459,19 @@ The test files check that the application behaves correctly:
 | [tests/test_graph.py](tests/test_graph.py) | Graph compilation, execution order, progress, preserved records, and separate requests; phase 4 adds researcher execution and distinct per-request contexts. |
 | [tests/test_workflow.py](tests/test_workflow.py) | Progress and preserved information from earlier phases; phase 3.5 adds graph delegation, typed output, original-record behavior, and errors. |
 | [tests/test_outreach_api.py](tests/test_outreach_api.py) | The request/response flow and API documentation; phase 4 adds supplied material, injected clients, input checks, model errors, and client cleanup. |
+
+The complete workflow adds these checks:
+
+| File | What it checks |
+|---|---|
+| [tests/test_full_workflow.py](tests/test_full_workflow.py) | The real complete graph, selection, blocked contacts, approval/rejection/editing, revision limits, fake Gmail actions, and duplicate/uncertain-send protection. |
+| [tests/test_tools.py](tests/test_tools.py) | Actual search/Gmail HTTP adapters with locally supplied responses, MIME email content, decoding, and failures. |
+| [tests/test_memory_policy.py](tests/test_memory_policy.py) | Stored facts, PostgreSQL-compatible tables, relevant retrieval, contact rules, sourced reply processing, and optional memory improvements. |
+| [tests/test_full_api.py](tests/test_full_api.py) | Complete HTTP requests, saved-run inspection, decisions, validation, API-key protection, request limits, replies, and generated documentation. |
+| [tests/test_checkpoints_controls.py](tests/test_checkpoints_controls.py) | SQLite restart/resume, persistent budgets, timeouts, injected search, measured model routes, and bounded concurrent work. |
+| [tests/test_evaluations.py](tests/test_evaluations.py) | The local evaluation runner and its ability to detect missing outputs, unsupported claims, wrong sources, and excessive revisions. |
+| [tests/test_groq_client.py](tests/test_groq_client.py) | Groq authentication/request format, validated results, incomplete or refused responses, provider failures, connection cleanup, selected-provider API behavior, approval without repeated calls, and evaluation provider selection. All provider responses are local. |
+| [tests/test_cli.py](tests/test_cli.py) | The terminal menu, validated input, exact draft decisions, edits requiring another approval, cancelled decision batches, configuration secrecy, fake services, saved-run lookup, and SQLite resume after reopening. |
 
 The tests run locally without calling external services. Tests that need to inspect the workflow can temporarily replace it with a fake function.
 
@@ -280,6 +510,21 @@ The tests run locally without calling external services. Tests that need to insp
 | `@pytest.mark.parametrize` | Run one test with several different examples. |
 | `assert` | Check an expectation; a mismatch fails the test. |
 
+## New code patterns used by the complete workflow
+
+| Code | Plain-language meaning |
+|---|---|
+| `class WorkflowState(OutreachState)` | Add complete-run fields to the existing state record. |
+| `interrupt(...)` | Pause the graph and expose the information a person needs to decide. |
+| `Command(resume=...)` | Supply the decision and continue the saved execution. |
+| `thread_id` | Identify the workflow whose checkpoint should be read or updated. |
+| `asyncio.Semaphore` | Allow only a configured number of overlapping operations. |
+| `asyncio.timeout` | Stop waiting after the configured duration. |
+| `Session(...), session.begin()` | Open a short database transaction and commit or roll back its changes. |
+| `claim_action` / `claim_contact_action` | Persist ownership before an external action so competing or repeated requests cannot send blindly. |
+| `asynccontextmanager` / `AsyncExitStack` | Keep resources open while needed and reliably close them afterward. |
+| `sha256` / `message_fingerprint` | Bind an approval and duplicate check to the actual recipient/message content. |
+
 ## Suggested reading order
 
 Start reading `app/api/outreach.py`, then follow its calls into `app/orchestration/state.py` and `app/orchestration/workflow.py`. Read `app/orchestration/graph.py` to see which step the workflow runs. Keep `app/models/schemas.py` open beside them to understand the records they use.
@@ -291,6 +536,8 @@ For phase three, read `generate_structured` in `app/models/client.py` first, the
 For the graph added in phase 3.5 and expanded in phase four, read `build_graph` in `graph.py`, the `research` node, and then `run_workflow` in `workflow.py`. The graph tests show the execution path; the workflow and API tests show how the rest of the application uses it.
 
 For phase four's reasoning component, read the instructions in `app/prompts/researcher.py`, then `Researcher.research` in `app/agents/researcher.py`. Compare them with the fake-client examples in `tests/test_researcher.py` and the README.
+
+For the complete workflow, read `api/runs.py`, the request/state classes in `models/workflow.py`, then `RunManager` in `orchestration/runs.py` and `build_full_graph` in `full_graph.py`. Follow one node into its business component and prompt. Read `nodes/approval.py` with the corresponding HTTP and workflow tests to understand pause/resume. Run `python -m app.demo` to see this path without credentials.
 
 ## Keeping this guide current
 

@@ -1,6 +1,6 @@
 """One shared entry point for structured model calls.
 
-Future agents call generate_structured and receive a validated Pydantic record.
+Application components call generate_structured and receive a validated record.
 They receive their client as an argument, so tests can substitute preset
 responses. OpenAI-specific calls stay in OpenAIModelClient.
 """
@@ -130,11 +130,15 @@ class OpenAIModelClient:
     """
 
     def __init__(
-        self, *, model: str, sdk_client: AsyncOpenAI | None = None
+        self, *, model: str, sdk_client: AsyncOpenAI | None = None,
+        max_output_tokens: int | None = None,
     ) -> None:
         if not isinstance(model, str) or not model.strip():
             raise ValueError("model must be a nonblank OpenAI model name.")
         self._model = model.strip()
+        self.model_name = self._model
+        self._max_output_tokens = max_output_tokens
+        self.last_usage: dict[str, int] = {}
         self._owns_sdk = sdk_client is None
         if sdk_client is None:
             api_key = os.getenv("OPENAI_API_KEY", "")
@@ -167,10 +171,14 @@ class OpenAIModelClient:
                 input=input_text,
                 text_format=response_model,
                 store=False,
+                **({"max_output_tokens": self._max_output_tokens} if self._max_output_tokens is not None else {}),
             )
         except APIError as error:
             raise ModelClientError("OpenAI model request failed.") from error
 
+        self.last_usage = ({name: getattr(response.usage, name) for name in (
+            "input_tokens", "output_tokens", "total_tokens",
+        )} if response.usage is not None else {})
         for output in response.output:
             if output.type == "message":
                 for content in output.content:

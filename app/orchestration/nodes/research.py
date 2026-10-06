@@ -25,7 +25,7 @@ async def research(state: OutreachState, runtime: Runtime[ResearchContext]) -> d
         goal=state.goal, research_material=context.research_material,
     )
     updates: dict[str, object] = {"current_step": "research_complete"}
-    if context.research_material.strip():
+    if context.research_material.strip() or getattr(researcher, "search_enabled", False):
         # Replace researched prospects when new evidence was supplied. Without
         # new evidence, preserve any results already held by the caller's state.
         updates["prospects"] = prospects

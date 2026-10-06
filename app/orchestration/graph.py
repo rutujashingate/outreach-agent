@@ -1,7 +1,7 @@
 """Define the workflow's execution path using the existing OutreachState.
 
-Phase four has one step: START -> research -> END. Later phases will add
-nodes here while keeping their business logic in application components.
+This compatibility path remains START -> research -> END. The checkpointed
+complete workflow is defined in full_graph.py and reuses the same components.
 """
 
 from langgraph.graph import END, START, StateGraph

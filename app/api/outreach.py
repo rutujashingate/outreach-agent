@@ -3,10 +3,11 @@
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.agents.researcher import Researcher
 from app.models.client import ModelClient, ModelClientError, OpenAIModelClient
+from app.models.groq_client import GroqModelClient
 from app.models.schemas import OutreachRequest
 from app.orchestration.state import OutreachState
 from app.orchestration.workflow import run_workflow
@@ -15,17 +16,19 @@ from app.orchestration.workflow import run_workflow
 router = APIRouter()
 
 
-async def get_research_client(request: OutreachRequest) -> AsyncIterator[ModelClient | None]:
+async def get_research_client(request: OutreachRequest, http_request: Request) -> AsyncIterator[ModelClient | None]:
     """Provide a real client only for requests with evidence; tests can replace it."""
     if not request.research_material.strip():
         yield None
         return
+    provider = http_request.app.state.settings.model_provider
     try:
-        client = OpenAIModelClient.from_env()
+        client = GroqModelClient.from_env() if provider == "groq" else OpenAIModelClient.from_env()
     except ValueError as error:
         raise HTTPException(
             status_code=503,
-            detail="Research requires OPENAI_API_KEY and OPENAI_MODEL to be configured.",
+            detail=("Research requires GROQ_API_KEY and a supported GROQ_MODEL to be configured."
+                    if provider == "groq" else "Research requires OPENAI_API_KEY and OPENAI_MODEL to be configured."),
         ) from error
     # This dependency owns the client and closes it after success or failure.
     async with client as ready_client:
