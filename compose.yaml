@@ -1,0 +1,31 @@
+services:
+  outreach:
+    build: .
+    init: true
+    env_file: .env
+    environment:
+      OUTREACH_HOST: 0.0.0.0
+      OUTREACH_PORT: "8000"
+      OUTREACH_DATA_DIR: /app/.data
+      OUTREACH_DATABASE_URL: ""
+      OUTREACH_CHECKPOINT_BACKEND: sqlite
+      OUTREACH_CHECKPOINT_POSTGRES_URL: ""
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - outreach_data:/app/.data
+    shm_size: "1gb"
+    cap_drop: [ALL]
+    security_opt:
+      - seccomp=./docker/seccomp_profile.json
+    stop_grace_period: 35s
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  outreach_data:

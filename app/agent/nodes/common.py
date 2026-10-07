@@ -5,6 +5,7 @@ import asyncio
 from app.domain.workflow import Outcome, WorkflowState
 from app.agent.context import WorkflowContext
 from app.storage.events import trace
+from app.services.cancellation import RunCancelled
 
 
 async def for_each(prospects, operation, context: WorkflowContext, *, run_id: str, stage: str):
@@ -15,6 +16,8 @@ async def for_each(prospects, operation, context: WorkflowContext, *, run_id: st
         async with semaphore:
             try:
                 return prospect, await operation(prospect)
+            except RunCancelled:
+                raise
             except Exception as error:
                 trace(context.repository, run_id, "prospect_failure", stage=stage,
                       prospect_id=prospect.id, error_type=type(error).__name__)

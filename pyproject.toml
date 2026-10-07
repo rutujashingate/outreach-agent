@@ -22,6 +22,12 @@ dependencies = [
     "httpx>=0.27,<1",  # Call search and Gmail through replaceable HTTP adapters.
     "sqlalchemy>=2.0,<3",  # Store relationship records in SQLite or PostgreSQL.
     "langgraph-checkpoint-sqlite>=3,<4",  # Resume local runs after a restart.
+    "playwright>=1.51,<2",  # Read public pages in a separate Chromium session.
+    "google-auth-oauthlib>=1.2,<2",  # Google sign-in and renewable credentials.
+    "cryptography>=44,<50",  # Encrypt connector credentials at rest.
+    "argon2-cffi>=23,<26",  # Hash the dashboard owner's password.
+    "alembic>=1.14,<2",  # Apply versioned application database migrations.
+    "python-dotenv>=1,<2",  # Load local settings at service startup.
 ]
 
 # Start the service; users interact through Telegram or the dashboard.
@@ -41,10 +47,11 @@ postgres = [
 
 # Include the application and its subpackages when installing the project.
 [tool.setuptools.packages.find]
-include = ["app", "app.*", "evals", "evals.*"]
+include = ["app", "app.*", "evals", "evals.*", "migrations", "migrations.*"]
 
 [tool.setuptools.package-data]
 evals = ["cases.json"]
+app = ["web/static/*"]
 
 # Look for tests in tests/ and use concise output when running pytest.
 [tool.pytest.ini_options]

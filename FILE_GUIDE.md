@@ -1,34 +1,189 @@
 # File guide
 
-This application is being reorganized around one outreach agent, Telegram, and a dashboard. This guide describes completed changes; the active [plan](plan.md) lists the remaining work. The [earlier phase history](docs/PHASE_HISTORY.md) and [earlier file explanations](docs/FILE_GUIDE_HISTORY.md) preserve the learning record.
+This guide explains the working application in plain language. The [setup guide](docs/SETUP.md) explains how to run it. The [API guide](docs/API_GUIDE.md) describes requests used by the dashboard. Earlier work is preserved in [phase history](docs/PHASE_HISTORY.md) and the [previous file guide](docs/FILE_GUIDE_HISTORY.md).
 
-## Phase 31: Consolidate the agent
+## Follow one request
 
-The old interactive CLI and separate research-only workflow were removed. The complete LangGraph workflow now lives under `app/agent`. The working research, qualification, memory, contact rules, writing, review, human approval, and Gmail protections were reused. Model providers now live separately from the records they produce. All 285 retained tests passed after the move; removed checks covered retired CLI/research-only entry points. The temporary complete-workflow HTTP routes are replaced by authenticated background-job routes in the connector steps below.
+1. You tell the Telegram bot your goal, background, research choices, and whether you want a Gmail draft or an approved send. You can also start from the dashboard.
+2. `AgentService.start()` validates these choices, saves a run and a job, and returns their identifiers immediately. A **run** holds the outreach results; a **job** is one queued piece of work on that run.
+3. One worker takes the job. `RunManager` opens the saved **LangGraph workflow**, an ordered set of steps with explicit choices about where to go next.
+4. The agent interprets the goal, researches public evidence, qualifies prospects, resolves addresses, checks relationship history and contact rules, then writes and reviews messages.
+5. Missing or ambiguous addresses pause the run for your selection. Reviewed drafts pause for your decisions. The database saves both pauses so restarting does not lose them.
+6. You select approve, reject, or edit for **every** pending prospect, then submit the batch. Telegram and the dashboard share these choices. An edit goes through review and needs a fresh approval.
+7. The worker verifies the current account, recipient, exact message, version, requested action, and contact rules. It records the Gmail action before and after calling Gmail. An uncertain result stays blocked for inspection.
+8. The dashboard displays the same saved run, sources, outcomes, events, and usage. No second research run is needed to switch interfaces.
 
-## How the code is organized
+For example, “Find professors studying AI observability” can become a sourced professor record and a reviewed email. Approval in draft mode creates a Gmail draft; it does not send it. The included demo uses a fictional university and simulated services.
 
-| Location | Purpose and connections |
+## Phase history: what changed when
+
+Phases 1–30 built and refined the original foundation, structured records, research, full outreach workflow, memory, providers, evaluations, CLI, and documentation. Their detailed records remain in [the archive](docs/PHASE_HISTORY.md). Old paths in that archive describe that earlier version.
+
+| Phase | What was built and which files changed | What became possible and how it was checked |
+|---|---|---|
+| **31 — Consolidate the core** | Moved orchestration into `app/agent`, shared records into `app/domain`, providers into `app/llm`, persistence into `app/storage`, and adapters into `app/connectors`. Removed the interactive CLI, research-only workflow, and obsolete entry points. | One outreach workflow remained. All 285 retained behavioral tests passed after the move. Tests for removed interfaces were retired. |
+| **32 — Saved jobs and Telegram** | Added `services/application.py`, `storage/control.py`, the Telegram connector, cooperative cancellation, and shared decision storage. Updated graph events and run execution. | Guided conversations, duplicate-update handling, shared approval batches, live step reporting, retries, and queue controls work without blocking message handling. Tests cover unauthorized chats, stale buttons, restarts, editing, and cancellation. |
+| **33 — Connected Gmail account** | Added `connectors/gmail/oauth.py` and owner authentication. Updated Gmail client, approval fingerprints, external actions, reply processing, and evaluation approval checks. | Google sign-in stores encrypted renewable credentials. Approved actions are tied to the connected account. Reply checks process up to five new messages and scan at most 20 tracked actions per request. Mocked OAuth/Gmail tests cover renewal, account changes, redaction, duplicates, and reply limits. |
+| **34 — Browser research and recipient evidence** | Added `connectors/browser`, `domain/browser.py`, and `agent/nodes/recipients.py`; extended research and workflow records. | The agent can read public pages, retain evidence, collect explicitly published addresses, and ask about missing or ambiguous recipients. Tests check network restrictions, persistent page limits, source selection, and a real Chromium fixture with JavaScript and blocked requests. |
+| **35 — Dashboard and local service** | Added `web/routes/control.py`, `web/static`, migrations, startup/shutdown, authentication, and instance locking. Replaced temporary API routes with `/api` jobs and shared controls. | The dashboard can inspect and approve a Telegram run. Automated tests cover login, CSRF, statistics, migrations, restart recovery, and an action finishing during cancellation. A real browser walkthrough exercised login → research → approval → simulated Gmail draft. |
+| **36 — Packaging and handoff** | Updated README, this guide, setup/API instructions, `.env.example`, the diagram, and contributor instructions. Added Docker packaging and upstream browser sandbox notices. | A single service command starts local work. The [validation record](docs/VALIDATION.md) distinguishes completed checks from live account and container checks that still need the owner's environment. |
+
+## Application entry and configuration
+
+| File | Purpose, main inputs, and outputs |
 |---|---|
-| `app/agent/graph.py` | Builds the complete workflow from nodes, which are individual steps. `build_full_graph(checkpointer)` returns a runnable graph whose progress can be saved. Research and writing use smaller internal graphs. |
-| `app/agent/state.py` | Defines the basic collections for one run; the complete state in `app/domain/workflow.py` adds sender, recipients, approvals, outcomes, and progress. Each run owns separate collections. |
-| `app/agent/nodes/` | Connects domain components to graph state. Each node takes the current state and services, and returns only the fields it changed. |
-| `app/agent/components/` | Implements interpretation, research, qualification, strategy, writing, review, and relationship-memory extraction/retrieval. Model responses must match domain records and available evidence. |
-| `app/agent/prompts/` | Contains the model instructions used by those components. |
-| `app/agent/policy.py` | `check_contact` returns whether a recipient can be contacted and why. `message_fingerprint` identifies the exact approved sender, recipient, and message. |
-| `app/agent/routing.py` | Small functions choose the next graph step based on qualification, review, and human decisions. |
-| `app/agent/context.py` | Supplies per-run services. Managed model and search clients reserve budgets before calls and record usage/events. |
-| `app/agent/replies.py` | Classifies an incoming reply and saves sourced relationship facts. Explicit opt-outs block further contact. |
-| `app/domain/` | Validated Python records for goals, prospects, drafts, decisions, replies, and saved workflow state. A record is a checked format for exchanging information. |
-| `app/llm/` | Groq, OpenAI, fake clients, and optional measured routing. `generate_structured` validates returned data against the requested record. |
-| `app/connectors/search.py` | Brave and fake search adapters. A search returns titles, URLs, and snippets. |
-| `app/connectors/gmail/client.py` | Reads threads and creates/sends messages through Gmail, with a fake client for tests. External writes are authorized by the workflow before this adapter is called. |
-| `app/services/runs.py` | `RunManager` starts, reads, resumes, and retries saved graph executions. A run ID links graph checkpoints to application records. |
-| `app/services/runtime.py` | Opens database, checkpoints, and network clients together and closes them when the service stops. |
-| `app/services/limits.py` | Defines bounds on calls, timeouts, revisions, and estimated spending. Estimated spending is not the provider's actual bill. |
-| `app/storage/` | SQL tables, relationship repositories, execution events, and checkpoint connections. Relationship records and LangGraph checkpoints retain their separate SQLite files. |
-| `app/settings.py` | Reads configuration without making external calls. |
-| `tests/` | Tests components and complete flows with local service substitutes. No real account credentials are required. |
-| `evals/` | Four fictional scenarios and their scoring rules. Simulated evaluations exercise the workflow; explicitly selected live evaluation measures a configured model. |
+| `app/main.py` | `main()` explicitly loads the project’s `.env`, reads startup options, and starts Uvicorn, the web server. `create_app()` assembles routes, authentication, the job worker, and Telegram tasks. Startup applies migrations and recovers interrupted jobs; shutdown lets bounded external actions record results. `/health` reports whether background tasks are still alive. |
+| `app/settings.py` | `Settings.from_env()` converts environment values into checked settings. It selects Groq by default and defines database, owner, connector, and operating-limit configuration. It does not contact providers. Secret fields are omitted from the settings object’s printed representation. |
+| `app/demo.py` | `build_demo_manager()` supplies fake model, search, browser, and Gmail clients to the real workflow. `DemoModelClient` produces fictional records by the requested record type. `demo_request()` provides a sample request for tests. Start the demo with `python -m app.main --demo`. |
+| `pyproject.toml` | Lists Python requirements, dependencies, optional test/Postgres packages, the `outreach-server` command, packaged dashboard assets, migrations, and pytest settings. |
+| `.env.example` | Documents configuration names without real secrets. Copy missing settings into your local `.env`; keep existing credentials. Service startup loads it automatically. |
+| `.gitignore` | Keeps credentials, databases, environments, and build outputs out of Git. |
 
-Further connector, dashboard, migration, and setup explanations are added below with their implementation.
+Every `__init__.py` marks its directory as an importable Python package. These files do not start the service or call external providers.
+
+## Agent core
+
+A **node** is a small workflow step. It receives the current state and the run’s services, then returns a dictionary containing only the fields it changed. LangGraph combines those changes with the saved state.
+
+| File | Purpose and main functions |
+|---|---|
+| `app/agent/graph.py` | `build_full_graph(checkpointer)` returns the main executable workflow. `build_research_graph()` groups interpretation, research, and qualification; `build_outreach_graph()` groups strategy, writing, and review. `observed()` wraps steps with cancellation checks, timings, events, and current-step reporting. |
+| `app/agent/state.py` | Defines `OutreachState`: the goal and separate collections for prospects, qualifications, strategies, drafts, reviews, and progress. The complete state extends it in `domain/workflow.py`. New runs never share mutable collections. |
+| `app/agent/context.py` | `WorkflowContext` passes services to nodes. `ManagedModelClient` and `ManagedSearchTool` reserve persistent budgets before calls, enforce timeouts, and record usage. This keeps controls outside model prompts. |
+| `app/agent/routing.py` | `after_qualification`, `after_contact_policy`, `after_review`, and approval routing functions return the next step’s name. They stop unsuitable outreach and bound revision loops. |
+| `app/agent/policy.py` | `check_contact()` takes a recipient and saved relationship facts and returns whether contact is allowed, with reasons. `message_fingerprint()` makes a hash identifying the sender, recipient, message, intended action, and Gmail account. A changed message or account no longer matches its old approval. |
+| `app/agent/replies.py` | `process_reply()` takes one known inbound message, prevents repeat processing, classifies it, extracts supported facts, and updates contact rules. `build_reply_graph()` organizes this small inbound workflow. An explicit opt-out is stored before optional model work. It never sends an automatic reply. |
+
+### Workflow nodes
+
+| File under `app/agent/nodes/` | What it does with the state |
+|---|---|
+| `goal.py` | `goal_node()` turns the raw goal into a structured description of whom to find and why. |
+| `discovery.py` | `discovery_node()` combines notes, optional search, and browser evidence, then returns sourced prospects and visited-page records. |
+| `qualification.py` | `qualification_node()` scores each prospect against the goal and keeps a bounded list of qualified prospects. |
+| `recipients.py` | `prepare_recipients()` prefers user-supplied addresses, otherwise checks addresses published on cited pages. One candidate can be selected automatically; zero or multiple candidates pause the run. `validate_selections()` requires an address or skip for every pending prospect. `choose_recipients()` resumes with those choices and retains the original evidence. |
+| `memory.py` | `memory_node()` retrieves saved relationship information and, when enabled, relevant Gmail conversations for each contact. |
+| `contact.py` | `contact_node()` applies opt-out, recent-contact, conversation, and timing rules before writing. |
+| `strategy.py` | `strategy_node()` creates a grounded approach for each allowed prospect. |
+| `writing.py` | `writing_node()` drafts or revises a message using the goal, sender background, strategy, and evidence. |
+| `review.py` | `review_node()` checks drafts and records review results. A failing draft can be revised within the shared revision limit. |
+| `approval.py` | `prepare_approval()` builds the exact review cards and message versions. `human_approval()` pauses and applies a complete decision batch. `validate_decisions()` rejects missing, duplicate, or stale decisions. Edits require review and another approval. |
+| `external.py` | `external_node()` rechecks approval, account identity, contact policy, and the durable action ledger before draft/send calls. `finish_node()` saves outcomes and interaction history. An uncertain write is recorded without automatically repeating it. |
+| `common.py` | `for_each()` limits concurrent prospect work and records individual failures. `allowed_prospects()` filters eligible targets. `failure()` creates a consistent failed outcome. Cancellation propagates instead of becoming an ordinary prospect failure. |
+
+### Components and prompts
+
+Components perform one task without deciding the overall workflow order. Their inputs are checked domain records; model responses must fit the requested result format.
+
+| File under `app/agent/components/` | Purpose |
+|---|---|
+| `goal_interpreter.py` | `interpret_goal()` converts a natural-language goal into `OutreachGoal`. |
+| `researcher.py` | Collects permitted notes/search/browser evidence and asks the model for prospects. Enforces source grounding and prospect limits. Browser reading stays within the saved page budget and follows links only one level deep. |
+| `qualifier.py` | `qualify()` takes a goal and prospect and produces a qualification score, decision, and reasons. |
+| `strategy.py` | `build_strategy()` takes prospect, goal, sender background, and memory; returns a strategy supported by that information. |
+| `writer.py` | `write_draft()` takes strategy and supporting information; returns an `EmailDraft`. Revision inputs include review feedback. |
+| `reviewer.py` | `review_draft()` takes a draft and its evidence; returns a review score, approval flag, and issues. This is automated review, separate from your final approval. |
+| `memory/extraction.py` | Extracts facts only when their quoted evidence appears in the supplied conversation. Recognizes explicit opt-outs without needing a model. |
+| `memory/retrieval.py` | `candidates()` loads unexpired facts; `retrieve()` ranks them for the goal and returns a bounded selection. Gmail history is read by the memory node using the Gmail connector. |
+| `memory/advanced.py` | `consolidate()` groups matching facts, `possible_conflicts()` flags disagreements, and `semantic_retrieve()` optionally ranks facts by similarity vectors. They are not a separate production database requirement. |
+
+The files `prompts/goal.py`, `researcher.py`, `qualification.py`, `strategy.py`, `writer.py`, and `reviewer.py` contain model instructions for their matching components. They explain allowed evidence and required output; Python still controls approval, routing, budgets, and external actions. Website text is evidence, not application instructions.
+
+## Shared data and model providers
+
+| File | Purpose, inputs, and outputs |
+|---|---|
+| `app/domain/schemas.py` | Pydantic records for a basic goal request, prospects, qualifications, strategies, drafts, and reviews. Pydantic checks types and required fields before the data moves on. |
+| `app/domain/workflow.py` | Adds `WorkflowRequest`, `WorkflowState`, sender/recipient records, approval requests/decisions, reply records, outcomes, and memory facts. A request includes research choices and Gmail action; a state adds results, account identity, versions, and progress. Goals remain trimmed and limited to 2,000 characters. |
+| `app/domain/browser.py` | `PageEvidence` stores a page URL, title, retrieval time, bounded text, links, explicitly found email addresses, and any read error. |
+| `app/llm/client.py` | Defines the common structured-model interface, validation/error helpers, OpenAI adapter, and `FakeModelClient`. `generate_structured()` returns a validated record rather than unchecked model text. |
+| `app/llm/groq_client.py` | Sends structured requests to Groq, checks returned JSON, and captures reported token usage. It implements the same interface as the other model adapters. |
+| `app/llm/router.py` | Retains optional measured model-routing helpers. The normal service uses the single configured provider; it does not automatically choose a cheaper model. |
+
+## Connectors
+
+A **connector** is an adapter between our application and an external service. Fake adapters implement the same operations using local examples, which lets tests exercise real workflow logic without keys or network calls.
+
+| File | Purpose and main operations |
+|---|---|
+| `app/connectors/search.py` | `BraveSearchTool.search()` takes a query and returns titles, URLs, and snippets. `FakeSearchTool` returns preset examples. Brave finds pages; the browser reads page contents. Supplied URLs or notes can avoid Brave entirely. |
+| `app/connectors/telegram/client.py` | `TelegramClient.call()` sends Bot API requests, bounds timeouts, and sanitizes errors. `RateLimited` carries a retry delay. `FakeTelegram` records calls without contacting Telegram. |
+| `app/connectors/telegram/bot.py` | `TelegramBot` guides the conversation, creates review/recipient buttons, and translates commands into shared-service calls. `poll()` saves owner-only private updates before advancing Telegram’s offset. `process_one()` handles saved updates. `deliver_one()` sends durable outbox messages and avoids blindly repeating an uncertain delivery. Buttons reference saved current versions. |
+| `app/connectors/gmail/client.py` | `GmailClient` searches/reads threads and creates drafts or sends messages. `encode_message()` creates the email payload with checked headers. `contact_messages()` extracts plain-text messages involving an exact address. `FakeGmailClient` records simulated operations. |
+| `app/connectors/gmail/oauth.py` | `GmailAccount.connect_url()` starts Google sign-in; `complete()` verifies the owner session and granted permissions, then saves the verified address and encrypted tokens. `CredentialVault` encrypts/decrypts secret records. `token()` renews an expired token. `disconnect()` removes local credentials and attempts Google revocation. `BoundGmail` holds the account lock through each request so an approval cannot switch accounts mid-action. |
+| `app/connectors/browser/client.py` | `BrowserClient.read(url)` returns `PageEvidence` using a fresh sandboxed Chromium session. `extract_emails()` accepts addresses actually present in visible text or a single-recipient contact link. `FakeBrowser` returns local evidence. Browser sessions have no personal login cookies, and submissions/downloads/WebSockets are blocked. |
+| `app/connectors/browser/network.py` | `parse_public_url()` checks HTTP/HTTPS URLs and ports. `public_address()` rejects private, local, reserved, or mixed public/private DNS answers. `PublicProxy` connects to the validated IP, covering redirects and subrequests too. This prevents a second DNS lookup from changing the destination to a private service. |
+| `app/connectors/browser/managed.py` | `ManagedBrowser.read()` reserves a page attempt in the database before browsing, saves evidence, and reuses saved evidence on retries. Restarts do not reset limits. |
+
+## Services and persistence
+
+| File | Purpose and main operations |
+|---|---|
+| `app/services/application.py` | `AgentService` is the shared entry point for both interfaces. `start()` queues work; `stage_decision()` saves one choice; `submit_choices()` queues a complete batch; `select_recipients()`, `retry()`, and `cancel()` control the same run. `execute_one()` executes one job. `check_replies()` processes bounded new inbound messages. `overview()`, `list_runs()`, and `details()` return dashboard data and paginated events. |
+| `app/services/runs.py` | `RunManager` connects saved runs to LangGraph. `execute_new()`, `resume()`, `select_recipients()`, and `retry()` execute or continue a saved run. `_execute()` owns leases, checkpoints, failures, and cancellation. `context()` supplies per-run adapters, including an account-bound Gmail client. Model clients are opened only when needed. |
+| `app/services/runtime.py` | `open_runtime()` opens the database, checkpoint connection, HTTP clients, and configured connectors, then closes them together. Demo mode injects fake services. |
+| `app/services/auth.py` | `OwnerAuth.login()` verifies the configured password and creates an opaque session. Password verification uses Argon2 hashing. `require_owner()` checks either an API key or owner session; browser writes also need a CSRF token, which prevents another site from silently submitting owner actions. Browser sessions expire on restart; saved approvals remain. |
+| `app/services/cancellation.py` | `check_cancelled()` reads the saved stop request and raises `RunCancelled` at a safe boundary. A Gmail action already underway finishes recording its result. |
+| `app/services/instance.py` | `instance_lock()` locks the data directory while the service runs. A second local process using that directory fails clearly instead of starting a second worker/poller. |
+| `app/services/limits.py` | `Limits` defines page/call counts, timeouts, concurrency, contact windows, revision limits, and estimated spending. Estimated cost is a configured per-call reservation, not a provider invoice. |
+| `app/storage/models.py` | Defines tables for contacts, memory, interactions, runs, traces, action locks, and the external-action ledger. A ledger is the durable record used to recognize an already attempted action. |
+| `app/storage/control.py` | Defines job, run-metadata, key/value, Telegram inbox, and outbox tables. `ControlStore.enqueue()` saves a run and initial job together. `claim()` honors queue pause. `recover()` marks interrupted work. Other methods persist conversations, approval selections, update offsets, page counts, and encrypted connector records. A repeated request key returns its original job. |
+| `app/storage/database.py` | `create_database()` opens SQLite by default and applies application migrations. Existing relationships are retained. |
+| `app/storage/repository.py` | Reads/writes relationship facts, outcomes, runs, budgets, leases, and action claims. It is reused by the workflow, reply processing, and shared service. |
+| `app/storage/checkpoints.py` | `open_checkpointer()` opens LangGraph’s progress store. SQLite is the service default. Its serializer recognizes relocated domain records and earlier record names. Memory and optional Postgres adapters remain for tests/earlier integrations. |
+| `app/storage/events.py` | `trace()` writes timestamped events and updates the currently running node. `events()` returns a run’s ordered trace. Events record useful metadata, not credentials or full model prompts. |
+| `migrations/env.py` | Connects Alembic, the migration runner, to the application’s existing database connection. |
+| `migrations/versions/v001_connected_service.py` | The first versioned migration adopts earlier tables without discarding data, adds service tables, and backfills metadata for existing runs. It deliberately has no destructive automatic downgrade. |
+
+The normal local installation uses **SQLite only**, with two files: `relationships.sqlite3` stores application records and `checkpoints.sqlite3` stores LangGraph progress. It does not require PostgreSQL. Both live under `OUTREACH_DATA_DIR`; the demo uses its `demo/` subdirectory. Credentials are encrypted in the application database; their encryption key stays in your environment.
+
+## Dashboard and deployment files
+
+| File | Purpose |
+|---|---|
+| `app/web/routes/control.py` | Authenticated `/api` routes validate incoming data and call `AgentService`. Run/reply/resume work returns HTTP 202 with a job identifier. Connector routes handle Google sign-in and status. The demo-only Telegram endpoint exercises the bot adapter locally. |
+| `app/web/static/index.html` | The dashboard’s page structure: login, navigation, content area, and run/edit forms. |
+| `app/web/static/app.js` | Fetches shared-service data, renders views, stages decisions, and submits controls. The new-run form accepts known addresses; run details retain completed drafts, reviews, decisions, and source retrieval times. Refreshes the visible view every five seconds while leaving active form entry alone. `node()` creates text safely instead of interpreting external content as HTML. Run submission preserves a request key after a lost response. |
+| `app/web/static/app.css` | Styles the responsive dashboard, review cards, forms, tables, status badges, and compact logs. |
+| `Dockerfile` | Builds the Python service with matching Chromium dependencies and runs it as a non-root user. |
+| `compose.yaml` | Starts one container with persistent data, local port binding, health checks, graceful shutdown, and browser sandbox configuration. |
+| `.dockerignore` | Excludes local credentials, databases, Git history, and environments from the build context. |
+| `docker/seccomp_profile.json` | Upstream Playwright system-call profile allowing Chromium’s sandbox to create user namespaces. |
+| `docker/PLAYWRIGHT_LICENSE`, `THIRD_PARTY_NOTICES.md` | Preserve the upstream profile’s Apache 2.0 license and attribution. Our project remains MIT licensed. |
+| `README.md` | Short project introduction, working features, diagram, and demo command. |
+| `docs/SETUP.md` | Local configuration, Telegram/Google setup, daily operations, and Docker instructions. |
+| `docs/API_GUIDE.md` | Current authenticated endpoints and request/response examples. |
+| `docs/VALIDATION.md` | Records what was actually tested and the remaining live-environment checks. |
+| `docs/assets/workflow.mmd`, `workflow.svg` | Editable Mermaid flowchart and its rendered image. Shows the actual shared request path and approval loop. |
+| `plan.md` | The implemented direction, defaults, acceptance criteria, and live validation boundary. |
+| `CONTRIBUTING.md`, `LICENSE` | Contributor workflow and MIT licensing terms. Contributors retain their copyright and license contributions under MIT. |
+
+## Tests and evaluations
+
+The completed local suite passes **327 tests**, including the optional Chromium fixture. All four simulated evaluation scenarios pass. Packaging and restart checks are recorded in [validation](docs/VALIDATION.md).
+
+**Tests** check behavior with known inputs. **Evaluations** score outreach results against small reference cases. A successful simulation confirms the workflow and scoring logic; it does not prove a real model’s research accuracy or writing quality.
+
+| File | What it checks in everyday language |
+|---|---|
+| `tests/conftest.py` | Provides fresh fictional records and isolated databases/settings. Real local keys cannot accidentally turn tests into live calls. |
+| `tests/test_schemas.py`, `test_state.py` | Input types, goal trimming/length, strict records, JSON conversion, and independent run collections. |
+| `tests/test_client.py`, `test_groq_client.py` | Structured response validation, provider failures, token information, and Groq configuration. |
+| `tests/test_researcher.py` | Research limits, accepted evidence, grounded URLs, duplicate prospects, and malformed model output. |
+| `tests/test_full_workflow.py` | Goal-to-draft behavior, qualification, review loops, edit/reject/approve decisions, account/action fingerprints, and duplicate external-action protections. |
+| `tests/test_memory_policy.py` | Supported memory quotes, relevance/expiry, opt-outs, contact timing, and reply handling. |
+| `tests/test_checkpoints_controls.py` | Saved progress, resume/retry behavior, call budgets, leases, and bounded execution. |
+| `tests/test_tools.py` | Search/Gmail adapters, correct email payloads, plain-text conversation parsing, and external failures. |
+| `tests/test_service.py` | Immediate job acknowledgments, replay protection, queue pause, complete multi-prospect choice batches, cancellation, current-step reporting, reply limits, statistics, and restart-preserved approvals. |
+| `tests/test_telegram.py` | Owner-only private access, repeated updates, restart-preserved conversation progress, guided fake-service outreach, cross-interface approvals, stale decisions, safe message chunking, and rate limits. |
+| `tests/test_gmail_oauth.py` | Encrypted tokens, refresh, revoked access, session-bound sign-in, verified account identity, changed-account blocking, and disconnect cleanup. |
+| `tests/test_browser.py` | Public network boundaries, explicit email extraction, persistent page budgets, recipient ambiguity, and user-address precedence. |
+| `tests/test_browser_integration.py` | An optional real Chromium test uses a local fixture to verify JavaScript-rendered text, blocked submissions, and blocked private redirects. It needs Chromium installed, but no public network or credentials. |
+| `tests/test_full_api.py` | HTTP 202 job behavior, input rejection, authentication, CSRF, rate limits, redacted errors, and shared run controls. Old `/outreach` and `/runs` entry points return 404. |
+| `tests/test_server_recovery.py` | Single-instance locking, data-preserving migrations, retry after interrupted job claim, and recording a Gmail action that finishes during cancellation. |
+| `tests/test_evaluations.py` | Four fictional scenarios score correctly; missing outputs, unsupported claims, wrong sources, and broken revision limits are detected. |
+| `evals/cases.json` | Four reference scenarios: jobs, academic outreach, sales, and networking. |
+| `evals/run.py` | `evaluate()` runs each scenario in an isolated workflow and returns scores, duration, calls, and estimated cost. The default uses scripted responses. `--live` explicitly uses an exported model configuration and consumes provider credits; it does not perform Gmail actions. |
+| `evals/scoring.py` | `score_run(state, reference)` compares targets, sources, qualification, memory, hooks, writing constraints, reviews, and workflow approval rules. It returns numbers from 0 to 1. |
+
+Use `python -m pytest` for ordinary offline checks, `RUN_BROWSER_TESTS=1 python -m pytest` to include Chromium, and `python -m evals.run` for the four simulated evaluations. Real Telegram delivery, Google consent, and live Gmail writes are recorded separately in the validation guide.

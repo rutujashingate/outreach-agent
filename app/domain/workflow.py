@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 
 from app.domain.schemas import EmailDraft, GoalText, NonEmptyText, OutreachRequest, Prospect
 from app.agent.state import OutreachState
+from app.domain.browser import PageEvidence
 
 # Reject whitespace, multiple recipients, and email-header injection. This is
 # syntax validation, not proof that an address exists or belongs to a person.
@@ -59,6 +60,7 @@ class Sender(Record):
 class Recipient(Record):
     email: EmailText
     source: NonEmptyText = "Explicitly supplied by the user"
+    evidence_quote: str = Field(default="", max_length=2000)
 
 
 class WorkflowRequest(OutreachRequest):
@@ -66,6 +68,9 @@ class WorkflowRequest(OutreachRequest):
     sender: Sender = Field(default_factory=Sender)
     recipients: dict[str, Recipient] = Field(default_factory=dict)
     use_search: bool = Field(default=False, strict=True)
+    use_browser: bool = Field(default=False, strict=True)
+    seed_urls: list[URLText] = Field(default_factory=list, max_length=5)
+    discover_emails: bool = Field(default=False, strict=True)
     gmail_action: Literal["none", "draft", "send"] = "none"
 
 
@@ -170,6 +175,13 @@ class WorkflowState(OutreachState):
     research_material: str = ""
     use_search: bool = False
     gmail_action: Literal["none", "draft", "send"] = "none"
+    use_browser: bool = False
+    seed_urls: list[URLText] = Field(default_factory=list)
+    discover_emails: bool = False
+    gmail_account_id: str | None = None
+    pages: list[PageEvidence] = Field(default_factory=list)
+    recipient_candidates: dict[str, list[Recipient]] = Field(default_factory=dict)
+    recipient_requests: list[str] = Field(default_factory=list)
     search_results: list[SearchResult] = Field(default_factory=list)
     recipients: dict[str, Recipient] = Field(default_factory=dict)
     memories: dict[str, list[MemoryFact]] = Field(default_factory=dict)
@@ -183,7 +195,7 @@ class WorkflowState(OutreachState):
     current_step: Literal[
         "initialized", "skeleton_ready", "research_complete", "interpreted",
         "qualified", "no_matches", "contact_checked", "written", "reviewed",
-        "awaiting_approval", "completed", "failed",
+        "awaiting_approval", "awaiting_recipients", "cancelled", "completed", "failed",
     ] = "initialized"
 
 
@@ -191,6 +203,7 @@ class RunResponse(Record):
     state: WorkflowState
     awaiting_approval: bool
     error: str | None = None
+    awaiting_recipients: bool = False
 
 
 class ReplyState(Record):

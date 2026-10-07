@@ -11,9 +11,12 @@ from app.domain.workflow import utc_now
 
 
 def trace(repository: Repository, run_id: str, event: str, **details) -> None:
+    from app.storage.control import ValueRow
     with Session(repository.engine) as session, session.begin():
         session.add(TraceRow(id=uuid4().hex, run_id=run_id, timestamp=utc_now().isoformat(),
                              event=event, payload=details))
+        if event == 'node_start':
+            session.merge(ValueRow(key='progress:' + run_id, value={'node': details['node']}))
 
 
 def events(repository: Repository, run_id: str) -> list[dict]:

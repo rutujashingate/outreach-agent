@@ -8,14 +8,14 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from pydantic import BaseModel
 
 from app.settings import Settings
-from app.domain import schemas, workflow
+from app.domain import schemas, workflow, browser
 from app.agent import state
 
 
 def checkpoint_serializer():
     # Explicitly allow only the application's record types. The serializer
     # does not need pickle or arbitrary dynamically imported application types.
-    allowed = {(record.__module__, record.__name__) for module in (schemas, workflow, state)
+    allowed = {(record.__module__, record.__name__) for module in (schemas, workflow, browser, state)
                for record in vars(module).values()
                if isinstance(record, type) and issubclass(record, BaseModel) and record is not BaseModel}
     return JsonPlusSerializer(pickle_fallback=False, allowed_msgpack_modules=sorted(allowed))

@@ -4,68 +4,46 @@ config:
   fontFamily: Arial
   themeCSS: 'text, tspan { font-family: Arial, Helvetica, sans-serif !important; }'
   themeVariables:
-    fontFamily: Arial, Helvetica, sans-serif
     fontSize: 15px
-    primaryColor: "#eff6ff"
-    primaryBorderColor: "#94a3b8"
-    primaryTextColor: "#0f172a"
-    lineColor: "#64748b"
-    edgeLabelBackground: "#ffffff"
+    primaryColor: '#eef8f6'
+    primaryBorderColor: '#78aaa0'
+    primaryTextColor: '#163b36'
+    lineColor: '#657d78'
+    edgeLabelBackground: '#ffffff'
   flowchart:
     htmlLabels: false
     curve: linear
-    nodeSpacing: 20
+    nodeSpacing: 25
     rankSpacing: 16
-    padding: 8
-    wrappingWidth: 280
+    padding: 10
+    wrappingWidth: 380
 ---
 flowchart TD
-    accTitle: Outreach workflow from the architecture and implemented phases
-    accDescr: A user goal enters through the CLI or API, becomes workflow state, and is coordinated by RunManager and LangGraph. Goal interpretation, research, prospects, qualification, memory checks, contact policy, strategy, writing, review, human approval, optional Gmail action, outcome, and memory update follow in order. Qualification and contact policy can stop outreach. Rewrites and human edits share one revision. Approval can reject, edit, pause, or proceed. Gmail can create a draft or send only when sending is explicitly enabled. Relationship history is saved for later runs. Checkpoints, tracing, security, and operating limits support execution; tests and evaluations check it separately.
-
-    goal([USER GOAL]) --> entry[CLI or API]
-    entry --> state[WORKFLOW STATE]
-    state --> manager["WORKFLOW COORDINATOR<br/>RunManager + LangGraph"]
-    manager --> interpretation[GOAL INTERPRETATION]
-    interpretation --> researcher[RESEARCHER]
-    evidence["Supplied notes<br/>or optional Brave search"] -. Evidence .-> researcher
-    researcher --> prospects[PROSPECTS + SOURCES]
-    prospects --> qualifier{"QUALIFIER<br/>Relevant to the goal?"}
-    qualifier -->|Qualified| memory[MEMORY CHECK]
-    qualifier -->|No matches| outcome[OUTCOME]
-    memory --> policy{"CONTACT POLICY<br/>Outreach allowed?"}
-    policy -->|Allowed| strategy[OUTREACH STRATEGY]
-    policy -->|Blocked| outcome
-    strategy --> writer[WRITER]
-    writer --> reviewer{"REVIEWER<br/>Draft passes?"}
-    reviewer -->|Pass| approval{"HUMAN APPROVAL"}
-    reviewer -->|Fail; revision available| writer
-    reviewer -->|Revision exhausted| outcome
+    accTitle: One outreach workflow shared by Telegram and the dashboard
+    accDescr: A goal enters through private Telegram or the owner dashboard. Both use a durable job queue and one worker running LangGraph. The workflow interprets the goal, researches evidence with Brave and a public browser, qualifies prospects, resolves recipient addresses, checks memory and contact policy, creates a strategy, writes and reviews email, pauses for human approval, and records an approved Gmail action. Edits return to review; blocked or rejected work ends with a saved outcome. SQLite holds progress, decisions, and events for both interfaces.
+    telegram["Private Telegram<br/>Goals and decisions"] --> service["Shared run service<br/>Saved queue and one worker"]
+    dashboard["Owner dashboard<br/>Connections and controls"] --> service
+    service --> goal["LANGGRAPH<br/>Interpret the goal"]
+    goal --> research["Research prospects + sources<br/>Notes · Brave search · public browser"]
+    research --> qualification{"Qualified prospects?"}
+    qualification -->|Yes| recipients["Resolve recipient addresses<br/>Published evidence or owner selection"]
+    qualification -->|No| outcome["Save outcomes + relationship history"]
+    recipients --> memory["Retrieve memory + Gmail history<br/>Apply contact rules"]
+    memory -->|Allowed| strategy["Outreach strategy → write email"]
+    memory -->|Blocked| outcome
+    strategy --> review{"Review passes?"}
+    review -->|Pass| approval{"Human approval"}
+    review -->|Revise within limit| strategy
+    review -->|Limit exhausted| outcome
+    approval -->|Edit: review new version| review
     approval -->|Reject| outcome
-    approval -->|Edit within limit; review again| reviewer
-    approval -->|Edit limit reached| outcome
-    approval -->|Later| pause["SAVED CHECKPOINT<br/>Run stays paused"]
-    pause -->|Resume same run| approval
-    approval -->|Approve current message| action{"GMAIL ACTION REQUESTED?"}
-    action -->|No; record approval| outcome
-    action -->|Yes| gmail["GMAIL ACTION<br/>Draft; send only if explicitly enabled<br/>Recheck approval, policy and duplicates"]
-    gmail --> outcome
-    outcome --> update["MEMORY UPDATE<br/>Save outcome and interaction history"]
-    update --> finish([END])
-
-    history[(SQLite relationship history)] -. Retrieve .-> memory
-    update -. Save .-> history
-
-    controls["Execution controls<br/>Checkpoints · tracing · security<br/>Call / cost limits · timeouts<br/>Tests and evals validate separately"] -. Support .-> manager
-
-    %% Tests and evals validate this flow separately; they are not runtime nodes.
-    %% The one revision is shared by automatic rewrites and human edits.
-    %% CLI actions are none or draft. Sending is a separate guarded API option.
-    classDef component fill:#eff6ff,stroke:#94a3b8,color:#0f172a;
-    classDef decision fill:#fff7ed,stroke:#fdba74,color:#0f172a;
-    classDef storage fill:#f0fdf4,stroke:#86efac,color:#0f172a;
-    classDef support fill:#f8fafc,stroke:#cbd5e1,color:#334155;
-    class goal,entry,state,manager,interpretation,researcher,prospects,memory,strategy,writer,gmail component;
-    class qualifier,policy,reviewer,approval,action decision;
-    class outcome,update,history,finish storage;
-    class evidence,controls,pause support;
+    approval -->|Approve exact message| action["Recheck account, policy + duplicates<br/>Gmail draft / enabled send / record only"]
+    action --> outcome
+    store[("SQLite<br/>Jobs, checkpoints and choices<br/>Evidence, events and action ledger")]
+    service -. Save and resume .-> store
+    approval -. Saved pause .-> store
+    outcome -. Persist .-> store
+    classDef decision fill:#fff6e6,stroke:#caa65d,color:#5b451b;
+    classDef storage fill:#edf3fc,stroke:#8da6c7,color:#243b58;
+    class qualification,review,approval decision;
+    class store,outcome storage;

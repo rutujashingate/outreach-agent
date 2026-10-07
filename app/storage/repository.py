@@ -127,6 +127,12 @@ class Repository:
                 row = RunRow(id=state.run_id)
                 session.add(row)
             row.payload, row.status, row.error = state.model_dump(mode="json"), status, error
+            from app.storage.control import RunMeta, now
+            meta = session.get(RunMeta, state.run_id)
+            if meta is None:
+                session.add(RunMeta(run_id=state.run_id))
+            else:
+                meta.updated_at = now()
 
     def run(self, run_id: str) -> dict | None:
         with Session(self.engine) as session:

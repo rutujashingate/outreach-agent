@@ -1,7 +1,7 @@
 """The complete workflow, split into research and message-preparation graphs.
 
-The original research-only graph is retained for existing callers. This graph
-adds checkpointed runs, explicit routing, review limits, and human approval.
+This is the single outreach entry point. Smaller internal graphs organize
+research and writing; all progress and approvals belong to the same saved run.
 """
 
 import time
@@ -13,6 +13,7 @@ from langgraph.runtime import Runtime
 from app.domain.workflow import WorkflowState
 from app.storage.events import trace
 from app.agent.context import WorkflowContext
+from app.agent.nodes.recipients import prepare_recipients, choose_recipients
 from app.agent.nodes.approval import human_approval, prepare_approval
 from app.agent.nodes.contact import contact_node
 from app.agent.nodes.discovery import discovery_node
@@ -32,6 +33,8 @@ def observed(name, function):
     """Record node timing and decisions while keeping business logic elsewhere."""
     async def node(state: WorkflowState, runtime: Runtime[WorkflowContext]) -> dict:
         context, started = runtime.context, time.monotonic()
+        from app.services.cancellation import check_cancelled
+        check_cancelled(context.repository, state.run_id)
         trace(context.repository, state.run_id, "node_start", node=name)
         try:
             result = await function(state, runtime)
@@ -84,6 +87,7 @@ def build_full_graph(checkpointer):
     builder.add_node("research", build_research_graph())
     builder.add_node("outreach", build_outreach_graph())
     for name, function in (
+        ("prepare_recipients", prepare_recipients), ("choose_recipients", choose_recipients),
         ("memory_check", memory_node), ("contact_policy", contact_node),
         ("prepare_approval", prepare_approval), ("human_approval", human_approval),
         ("external_actions", external_node), ("finish", finish_node),
@@ -91,7 +95,10 @@ def build_full_graph(checkpointer):
         builder.add_node(name, observed(name, function))
     builder.add_edge(START, "research")
     builder.add_conditional_edges("research", after_qualification,
-                                  {"memory_check": "memory_check", "finish": "finish"})
+                                  {"memory_check": "prepare_recipients", "finish": "finish"})
+    builder.add_conditional_edges("prepare_recipients", lambda state: "choose_recipients" if state.recipient_requests else "memory_check",
+                                  {"choose_recipients": "choose_recipients", "memory_check": "memory_check"})
+    builder.add_edge("choose_recipients", "memory_check")
     builder.add_edge("memory_check", "contact_policy")
     builder.add_conditional_edges("contact_policy", after_contact_policy,
                                   {"outreach": "outreach", "finish": "finish"})

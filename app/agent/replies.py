@@ -98,6 +98,10 @@ async def process_reply(manager: RunManager, request: ReplyRequest) -> ReplyStat
     # from outward outreach runs; relationship events retain the message source.
     run_id = key[:32]
     manager.repository.save_run(WorkflowState(run_id=run_id, goal="Process an incoming reply"), "running")
+    from sqlalchemy.orm import Session
+    from app.storage.control import RunMeta
+    with Session(manager.repository.engine) as session, session.begin():
+        session.get(RunMeta, run_id).kind = "reply"
     try:
         async with manager.context(run_id) as context:
             result = await build_reply_graph().ainvoke(ReplyState(run_id=run_id, reply=request), context=context)

@@ -12,8 +12,10 @@ from app.connectors.search import SearchTool
 class Researcher:
     """Use the existing model boundary; the caller owns the injected client."""
 
-    def __init__(self, *, client: ModelClient | None = None, search_tool: SearchTool | None = None) -> None:
+    def __init__(self, *, client: ModelClient | None = None, search_tool: SearchTool | None = None, browser_tool=None, seed_urls=None, max_pages=5) -> None:
         self._client = client
+        self.browser_tool, self.seed_urls, self.max_pages = browser_tool, seed_urls or [], max_pages
+        self.pages = []
         self._search_tool = search_tool
         self.search_enabled = search_tool is not None
         self.search_results: list[SearchResult] = []
@@ -34,6 +36,26 @@ class Researcher:
                 # The URL and snippet stay together as supplied evidence.
                 search_notes = json.dumps([item.model_dump() for item in self.search_results], ensure_ascii=False)
                 request.research_material += "\n" + search_notes
+        if self.browser_tool is not None:
+            from app.services.limits import LimitExceeded
+            roots = list(dict.fromkeys(self.seed_urls + [r.url for r in self.search_results]))
+            queue = [(url, 0) for url in roots[:max(1, self.max_pages - 2)]]
+            visited = set()
+            while queue and len(visited) < self.max_pages:
+                url, depth = queue.pop(0)
+                if url in visited: continue
+                visited.add(url)
+                try: page = await self.browser_tool.read(url)
+                except LimitExceeded: break
+                self.pages.append(page)
+                if page.error: continue
+                if depth == 0:
+                    links = sorted(page.links, key=lambda link: not any(word in link.lower() for word in ('contact', 'about', 'team', 'people')))
+                    queue.extend((link, 1) for link in links if link not in visited)
+                evidence = json.dumps({'url': page.url, 'title': page.title, 'text': page.text,
+                                       'public_contact_links': page.emails}, ensure_ascii=False)
+                room = max(0, 100000 - len(request.research_material))
+                request.research_material += ('\n' + evidence)[:room]
         self.evidence_material = request.research_material
         if not request.research_material.strip():
             # No search is available yet. An empty evidence set yields no facts.

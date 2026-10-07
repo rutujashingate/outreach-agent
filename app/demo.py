@@ -1,22 +1,19 @@
 """Run a complete local demonstration with fictional data and fake tools.
 
-Run `python -m app.demo` for a command-line example, or
-`uvicorn app.demo:app --port 8001` for the same simulation through the API.
+Start with `python -m app.main --demo` and open the dashboard.
 This demonstrates control flow, not actual research or model quality.
 """
 
-import asyncio
 from contextlib import asynccontextmanager
 import json
 
 from langgraph.checkpoint.memory import InMemorySaver
 
 from app.storage.database import create_database
-from app.main import create_app
 from app.storage.repository import Repository
 from app.llm.client import FakeModelClient
 from app.domain.schemas import Prospect
-from app.domain.workflow import ApprovalSubmission, SearchResult, Sender, WorkflowRequest
+from app.domain.workflow import SearchResult, Sender, WorkflowRequest
 from app.services.runs import RunManager
 from app.settings import Settings
 from app.connectors.gmail.client import FakeGmailClient
@@ -71,35 +68,22 @@ def demo_request() -> WorkflowRequest:
         recipients={"p1": {"email": "professor@example.com"}}, gmail_action="draft")
 
 
+class DemoGmail(FakeGmailClient):
+    def status(self):
+        return {"connected": True, "configured": True, "email": "student@example.com", "account_id": "demo-account", "health": "simulated"}
+
+
 def build_demo_manager(*, repository=None, checkpointer=None, settings=None):
     @asynccontextmanager
     async def client_factory():
         yield DemoModelClient()
+    from app.connectors.browser.client import FakeBrowser
+    from app.domain.browser import PageEvidence
+    browser = FakeBrowser({"https://example.com/lab": PageEvidence(url="https://example.com/lab", title="Example University",
+        text="Example University. Ada Example studies AI observability. Contact professor@example.com.",
+        emails={"professor@example.com": "Ada Example — contact professor@example.com"})})
     return RunManager(repository or Repository(create_database()), checkpointer or InMemorySaver(),
         settings=settings or Settings(checkpoint_backend="memory"), client_factory=client_factory,
         search=FakeSearchTool([SearchResult(title="Example University: Ada Example", url="https://example.com/lab",
-            description="Ada Example studies AI observability at Example University.")]), gmail=FakeGmailClient())
-
-
-async def demonstrate():
-    manager = build_demo_manager()
-    try:
-        response = await manager.start(demo_request())
-        print(f"Simulated run {response.state.run_id}: {response.state.current_step}")
-        request = response.state.approval_requests[0]
-        response = await manager.resume(response.state.run_id, ApprovalSubmission(decisions=[{
-            "prospect_id": request.prospect.id, "version": request.version,
-            "fingerprint": request.fingerprint, "action": "approve",
-        }]))
-        print(f"After simulated approval: {response.state.outcomes['p1'].status}")
-        print("Fake Gmail calls:", [name for name, data in manager.gmail.calls])
-        print("No external services were called and no real draft or email was created.")
-    finally:
-        manager.repository.engine.dispose()
-
-
-# This separate application is deliberately a simulation and has no real SDKs.
-app = create_app(manager=build_demo_manager())
-
-if __name__ == "__main__":
-    asyncio.run(demonstrate())
+            description="Ada Example studies AI observability at Example University.")]),
+        gmail=DemoGmail({'thread-1': {'messages': []}}), browser=browser)

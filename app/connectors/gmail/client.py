@@ -56,9 +56,9 @@ def contact_messages(thread: dict, email: str) -> list[dict]:
     for message in thread.get("messages", []):
         payload = message.get("payload", {})
         headers = {item["name"].casefold(): item["value"] for item in payload.get("headers", [])}
-        parties = {address.casefold() for _, address in getaddresses([
+        parties = {address.casefold() for _, address in getaddresses([value for value in [
             headers.get("from", ""), headers.get("to", ""), headers.get("cc", ""),
-        ])}
+        ] if value.strip()])}
         if email.casefold() not in parties:
             continue
         text = _plain_text(payload)
@@ -74,10 +74,11 @@ def contact_messages(thread: dict, email: str) -> list[dict]:
 
 
 class GmailClient:
-    def __init__(self, client: httpx.AsyncClient, access_token: str):
+    def __init__(self, client: httpx.AsyncClient, access_token: str, on_unauthorized=None):
         if not access_token.strip():
             raise ValueError("GMAIL_ACCESS_TOKEN is required for Gmail access.")
         self.client, self.access_token = client, access_token
+        self.on_unauthorized = on_unauthorized
 
     async def _request(self, method: str, path: str, **kwargs) -> dict:
         try:
@@ -85,6 +86,8 @@ class GmailClient:
                 method, "https://gmail.googleapis.com/gmail/v1/users/me/" + path,
                 headers={"Authorization": f"Bearer {self.access_token}"}, **kwargs,
             )
+            if response.status_code == 401 and self.on_unauthorized is not None:
+                self.on_unauthorized()
             response.raise_for_status()
             data = response.json()
             if not isinstance(data, dict):

@@ -2,7 +2,7 @@
 
 Replace the old CLI and research-only entry points with one application shared by a private Telegram bot and an authenticated dashboard. Keep the tested outreach behavior and local SQLite data. Groq remains the chosen provider.
 
-## Delivery steps
+## Implemented delivery steps
 
 1. **Consolidate the core:** organize agent, domain, model providers, connectors, services, storage, and web packages. Remove retired entry points. Implement saved background jobs and Telegram conversations/approvals.
 2. **Connect Gmail:** owner login, Google OAuth, encrypted renewable credentials, account-bound approvals, drafts, guarded sends, and on-demand reply checks.
@@ -13,6 +13,12 @@ Replace the old CLI and research-only entry points with one application shared b
 ## Acceptance
 
 Telegram goal → public browser research → qualification and contact checks → strategy and reviewed draft → current human approval → Gmail action → saved outcome. The dashboard shows the same run. Restarting preserves pending approvals without duplicate actions. Automated tests require no live services. Live integration checks are recorded separately and require configured accounts.
+
+## Verification status
+
+The new service, connectors, dashboard, migrations, and Docker configuration are implemented. All 327 automated checks pass, including a real local Chromium fixture. The four simulated evaluation scenarios pass. A fresh installed package was started outside the repository and resumed a saved approval after restart without repeating research or a Gmail action.
+
+Real Telegram delivery, Google consent and Gmail draft/send checks, live model quality, and Docker execution remain environment checks. No live Google account was connected or messaged during implementation, and Docker is unavailable on this machine. Details are recorded in [local validation](docs/VALIDATION.md).
 
 ## Defaults
 

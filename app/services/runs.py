@@ -20,6 +20,7 @@ from app.agent.nodes.approval import validate_decisions
 from app.settings import Settings
 from app.connectors.gmail.client import GmailTool
 from app.connectors.search import SearchTool
+from app.services.cancellation import RunCancelled, check_cancelled
 
 
 class ConfigurationError(RuntimeError):
@@ -86,7 +87,7 @@ class RunManager:
 
     def __init__(self, repository: Repository, checkpointer, *, settings: Settings | None = None,
                  client_factory=None, search: SearchTool | None = None, gmail: GmailTool | None = None,
-                 memory_retriever=None):
+                 memory_retriever=None, browser=None):
         self.repository, self.settings = repository, settings or Settings()
         if isinstance(checkpointer.serde, JsonPlusSerializer):
             checkpointer.serde = checkpoint_serializer()
@@ -94,6 +95,7 @@ class RunManager:
         self.client_factory = client_factory or (lambda: real_model_client(self.settings))
         self.search, self.gmail = search, gmail
         self.memory_retriever = memory_retriever
+        self.browser = browser
 
     def config(self, run_id: str):
         return {"configurable": {"thread_id": run_id}, "recursion_limit": self.settings.limits.max_graph_steps}
@@ -101,24 +103,35 @@ class RunManager:
     @asynccontextmanager
     async def context(self, run_id: str):
         async with self.client_factory() as client:
+            gmail = self.gmail
+            saved = self.repository.run(run_id)
+            if gmail and hasattr(gmail, "for_run") and saved:
+                gmail = gmail.for_run(saved["state"].get("sender", {}).get("email"), saved["state"].get("gmail_account_id"))
+            reading = self.settings.read_gmail and (not hasattr(gmail, "status") or gmail.status().get("connected", False))
             yield WorkflowContext(
                 client=ManagedModelClient(client, self.repository, run_id, self.settings.limits),
                 repository=self.repository, limits=self.settings.limits,
                 search=ManagedSearchTool(self.search, self.repository, run_id, self.settings.limits) if self.search else None,
-                gmail=self.gmail, read_gmail=self.settings.read_gmail, sending_enabled=self.settings.sending_enabled,
-                memory_retriever=self.memory_retriever,
+                gmail=gmail, read_gmail=reading, sending_enabled=self.settings.sending_enabled,
+                memory_retriever=self.memory_retriever, browser=self.browser,
             )
 
-    async def start(self, request: WorkflowRequest) -> RunResponse:
+    def validate_request(self, request: WorkflowRequest) -> None:
         if self.settings.read_gmail and self.gmail is None:
-            raise ConfigurationError("Gmail reading was requested; configure GMAIL_ACCESS_TOKEN.")
+            raise ConfigurationError("Gmail reading was requested; connect Gmail in the dashboard.")
         if request.use_search and self.search is None:
             raise ConfigurationError("Search was requested; configure BRAVE_SEARCH_API_KEY or inject a search tool.")
         if request.gmail_action != "none" and (self.gmail is None or request.sender.email is None):
             raise ConfigurationError("Gmail actions require Gmail configuration and a sender email.")
         if request.gmail_action == "send" and not self.settings.sending_enabled:
             raise RunConflict("Sending is disabled. It requires explicit enablement and human approval.")
-        state = WorkflowState(run_id=uuid4().hex, **request.model_dump())
+        if request.use_browser and self.browser is None:
+            raise ConfigurationError("Browser research is unavailable; install Chromium and enable the browser connector.")
+
+    async def start(self, request: WorkflowRequest) -> RunResponse:
+        self.validate_request(request)
+        state = WorkflowState(run_id=uuid4().hex, **request.model_dump(),
+            gmail_account_id=self.gmail.status().get("account_id") if self.gmail and hasattr(self.gmail, "status") else None)
         self.repository.save_run(state, "running")
         return await self._execute(state.run_id, state)
 
@@ -127,18 +140,26 @@ class RunManager:
         if record is None:
             raise RunNotFound("Unknown run identifier.")
         return RunResponse(state=WorkflowState.model_validate(record["state"]),
-                           awaiting_approval=record["status"] == "paused", error=record["error"])
+                           awaiting_approval=record["status"] == "paused" and record["state"]["current_step"] == "awaiting_approval",
+                           awaiting_recipients=record["status"] == "paused" and record["state"]["current_step"] == "awaiting_recipients", error=record["error"])
 
     async def resume(self, run_id: str, submission: ApprovalSubmission) -> RunResponse:
         return await self._execute(run_id, Command(resume=submission.model_dump(mode="json")), submission=submission)
 
+    async def select_recipients(self, run_id: str, selections: dict) -> RunResponse:
+        return await self._execute(run_id, Command(resume={"recipients": selections}), selections=selections)
+
+    async def execute_new(self, run_id: str) -> RunResponse:
+        return await self._execute(run_id, self.get(run_id).state)
+
     async def retry(self, run_id: str) -> RunResponse:
         return await self._execute(run_id, None, retry=True)
 
-    async def _execute(self, run_id: str, input_value, *, submission=None, retry=False) -> RunResponse:
+    async def _execute(self, run_id: str, input_value, *, submission=None, retry=False, selections=None) -> RunResponse:
         previous = self.repository.run(run_id)
         if previous is None:
             raise RunNotFound("Unknown run identifier.")
+        check_cancelled(self.repository, run_id)
         limits = self.settings.limits
         lease_seconds = int(limits.max_model_calls * limits.model_timeout +
                             limits.max_search_calls * limits.search_timeout +
@@ -150,6 +171,11 @@ class RunManager:
             # approvals rather than using a snapshot read before the lock.
             previous = self.repository.run(run_id)
             state = WorkflowState.model_validate(previous["state"])
+            if selections is not None:
+                from app.agent.nodes.recipients import validate_selections
+                if previous["status"] != "paused" or state.current_step != "awaiting_recipients":
+                    raise RunConflict("This run is not waiting for recipient selection.")
+                validate_selections(state, selections)
             if submission is not None:
                 if previous["status"] != "paused":
                     raise RunConflict("This run is not waiting for approval.")
@@ -162,7 +188,9 @@ class RunManager:
                 if previous["status"] != "failed":
                     raise RunConflict("Only a failed execution can be retried.")
                 snapshot = await self.graph.aget_state(self.config(run_id))
-                if not snapshot.values or not snapshot.next:
+                if not snapshot.values:
+                    input_value = state
+                elif not snapshot.next:
                     raise RunConflict("There is no resumable failed checkpoint.")
             self.repository.save_run(state, "running")
             trace(self.repository, run_id, "resume" if submission is not None else "retry" if retry else "run_start")
@@ -174,7 +202,15 @@ class RunManager:
                 paused = any(task.interrupts for task in snapshot.tasks)
                 self.repository.save_run(result, "paused" if paused else "completed")
                 trace(self.repository, run_id, "run_paused" if paused else "run_end", current_step=result.current_step)
-                return RunResponse(state=result, awaiting_approval=paused)
+                return RunResponse(state=result, awaiting_approval=paused and result.current_step == "awaiting_approval",
+                                   awaiting_recipients=paused and result.current_step == "awaiting_recipients")
+            except RunCancelled:
+                snapshot = await self.graph.aget_state(self.config(run_id))
+                result = WorkflowState.model_validate(snapshot.values) if snapshot.values else state
+                result.current_step = "cancelled"
+                self.repository.save_run(result, "cancelled")
+                trace(self.repository, run_id, "run_cancelled")
+                return RunResponse(state=result, awaiting_approval=False)
             except (Exception, CancelledError) as error:
                 snapshot = await self.graph.aget_state(self.config(run_id))
                 result = WorkflowState.model_validate(snapshot.values) if snapshot.values else state

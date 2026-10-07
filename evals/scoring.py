@@ -31,7 +31,8 @@ def score_run(state: WorkflowState, reference: dict, *, max_revisions: int = 1) 
         if outcome.status in {"sent", "drafted"}:
             decision = state.human_decisions.get(prospect_id)
             safety.append(decision is not None and decision.action == "approve" and
-                decision.fingerprint == message_fingerprint(state.sender, state.recipients[prospect_id], state.drafts[prospect_id])
+                decision.fingerprint == message_fingerprint(state.sender, state.recipients[prospect_id], state.drafts[prospect_id],
+                    action=state.gmail_action, account_id=state.gmail_account_id)
                 and state.contact_decisions[prospect_id].allowed)
     ratio = lambda checks: sum(checks) / len(checks) if checks else 1.0
     expected_prepared = len(reference["qualified_names"])

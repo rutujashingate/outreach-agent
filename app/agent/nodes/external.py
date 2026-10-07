@@ -14,6 +14,8 @@ from app.agent.policy import check_contact, message_fingerprint
 async def external_node(state: WorkflowState, runtime: Runtime[WorkflowContext]) -> dict:
     context, outcomes = runtime.context, dict(state.outcomes)
     for prospect in state.qualified_prospects:
+        from app.services.cancellation import check_cancelled
+        check_cancelled(context.repository, state.run_id)
         prospect_id = prospect.id
         if prospect_id in outcomes:
             continue
@@ -21,7 +23,7 @@ async def external_node(state: WorkflowState, runtime: Runtime[WorkflowContext])
         recipient, draft = state.recipients.get(prospect_id), state.drafts.get(prospect_id)
         if recipient is None or draft is None or review is None or not review.approved or decision is None:
             continue
-        fingerprint = message_fingerprint(state.sender, recipient, draft)
+        fingerprint = message_fingerprint(state.sender, recipient, draft, state.gmail_action, state.gmail_account_id)
         if decision.action != "approve" or decision.version != state.draft_versions.get(prospect_id) or decision.fingerprint != fingerprint:
             outcomes[prospect_id] = Outcome(prospect_id=prospect_id, status="blocked",
                 reason="There is no approval for the current recipient and message.", source=f"run:{state.run_id}:approval")
@@ -30,6 +32,8 @@ async def external_node(state: WorkflowState, runtime: Runtime[WorkflowContext])
         if state.gmail_action == "none":
             outcomes[prospect_id] = Outcome(prospect_id=prospect_id, status="approved", source=source)
             continue
+        if hasattr(context.gmail, "ensure_account"):
+            await context.gmail.ensure_account(state.sender.email, state.gmail_account_id)
         key = stable_id("gmail:" + state.gmail_action, fingerprint)
         existing = context.repository.action(key)
         if existing is not None:

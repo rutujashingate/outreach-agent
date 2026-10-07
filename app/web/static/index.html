@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Outreach · Agent control</title>
+    <link rel="stylesheet" href="/static/app.css" />
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <section id="login" class="login">
+      <form id="login-form" class="login-card">
+        <div class="brand-mark">O</div>
+        <p class="eyebrow">OUTREACH AGENT</p>
+        <h1>Your outreach,<br />under your control.</h1>
+        <p>
+          Sign in to review work, manage connections, and see what your agent is
+          doing.
+        </p>
+        <label
+          >Owner password<input
+            type="password"
+            id="password"
+            autocomplete="current-password"
+            required /></label
+        ><button class="primary" type="submit">Open dashboard →</button>
+        <p id="login-error" role="alert"></p>
+      </form>
+    </section>
+    <div id="shell" hidden>
+      <aside>
+        <a class="brand" href="/"
+          >O<span>outreach<small>AGENT WORKSPACE</small></span></a
+        >
+        <nav>
+          <button data-view="overview" class="active">Overview</button
+          ><button data-view="runs">Runs & approvals</button
+          ><button data-view="connections">Connections</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <span class="live-dot"></span
+          ><span id="sidebar-status">Local service</span
+          ><button id="logout" class="quiet">Sign out</button>
+        </div>
+      </aside>
+      <main>
+        <header>
+          <div>
+            <p class="eyebrow">YOUR WORKSPACE <span id="demo-label"></span></p>
+            <h1 id="page-title">Overview</h1>
+          </div>
+          <div class="header-actions">
+            <span id="updated" class="muted"></span
+            ><button id="new-run" class="primary">＋ New run</button>
+          </div>
+        </header>
+        <div id="notice" role="status" hidden></div>
+        <div id="content"></div>
+      </main>
+    </div>
+    <dialog id="run-dialog">
+      <form id="run-form">
+        <div class="dialog-heading">
+          <h2>Start an outreach run</h2>
+          <button type="button" id="close-run" class="quiet">Close</button>
+        </div>
+        <label
+          >Goal<textarea
+            name="goal"
+            required
+            maxlength="2000"
+            placeholder="Find professors studying AI observability for PhD outreach."
+          ></textarea>
+        </label>
+        <div class="two-col">
+          <label>Your name<input name="name" required value="User" /></label
+          ><label
+            >Sender email<input
+              name="email"
+              type="email"
+              placeholder="Connected Gmail address"
+          /></label>
+        </div>
+        <label
+          >Your background or offering<textarea
+            name="context"
+            maxlength="10000"
+            placeholder="Describe the experience or offering the agent may mention."
+          ></textarea></label
+        ><label
+          >Starting URLs <span class="muted">one per line, up to five</span
+          ><textarea
+            name="urls"
+            placeholder="https://example.com/team"
+          ></textarea></label
+        ><label
+          >Research notes with sources<textarea
+            name="notes"
+            maxlength="100000"
+          ></textarea>
+        </label>
+        <div class="checks">
+          <label><input type="checkbox" name="search" /> Search the web</label
+          ><label
+            ><input type="checkbox" name="browser" checked /> Read public
+            pages</label
+          ><label
+            ><input type="checkbox" name="discover" checked /> Find published
+            email addresses</label
+          >
+        </div>
+        <label
+          >Known recipient addresses
+          <span class="muted">one Target | email per line; optional</span
+          ><textarea
+            name="recipients"
+            placeholder="Example University | professor@example.com"
+          ></textarea></label
+        ><label
+          >After your approval<select name="action">
+            <option value="draft">Create Gmail drafts</option>
+            <option value="none">Save approved results in the app</option>
+            <option value="send">Send emails (requires enablement)</option>
+          </select></label
+        >
+        <p class="muted">
+          You will review the recipient and complete message before any Gmail
+          action.
+        </p>
+        <button class="primary" type="submit">Start research</button>
+        <p id="run-error" role="alert"></p>
+      </form>
+    </dialog>
+    <dialog id="edit-dialog">
+      <form id="edit-form">
+        <h2>Edit draft</h2>
+        <label>Subject<input name="subject" required /></label
+        ><label>Body<textarea name="body" required rows="12"></textarea></label>
+        <p class="muted">
+          An edit uses the revision allowance and requires another review and
+          approval.
+        </p>
+        <div class="actions">
+          <button class="primary" type="submit">Save edit decision</button
+          ><button id="close-edit" type="button">Cancel</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

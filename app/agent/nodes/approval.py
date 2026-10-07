@@ -15,7 +15,7 @@ async def prepare_approval(state: WorkflowState, runtime: Runtime[WorkflowContex
         review = state.reviews.get(prospect.id)
         if review is None or not review.approved:
             continue
-        fingerprint = message_fingerprint(state.sender, state.recipients[prospect.id], state.drafts[prospect.id])
+        fingerprint = message_fingerprint(state.sender, state.recipients[prospect.id], state.drafts[prospect.id], state.gmail_action, state.gmail_account_id)
         decision = state.human_decisions.get(prospect.id)
         if decision is not None and decision.action == "approve" and decision.fingerprint == fingerprint:
             continue

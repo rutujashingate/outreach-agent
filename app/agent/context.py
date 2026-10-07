@@ -12,6 +12,7 @@ from app.storage.events import trace
 from app.services.limits import Limits
 from app.connectors.gmail.client import GmailTool
 from app.connectors.search import SearchTool, ToolError
+from app.services.cancellation import check_cancelled
 
 
 class ManagedModelClient:
@@ -29,6 +30,7 @@ class ManagedModelClient:
             # Only transport failures get one retry. Invalid output and refusals
             # require an explicit response, not repeated blind requests.
             for attempt in range(2):
+                check_cancelled(self.repository, self.run_id)
                 self.repository.reserve_call(self.run_id, "model", self.limits)
                 started = time.monotonic()
                 trace(self.repository, self.run_id, "model_start", task=response_model.__name__, attempt=attempt)
@@ -60,6 +62,7 @@ class ManagedSearchTool:
 
     async def search(self, query: str) -> list[SearchResult]:
         for attempt in range(2):
+            check_cancelled(self.repository, self.run_id)
             self.repository.reserve_call(self.run_id, "search", self.limits)
             started = time.monotonic()
             trace(self.repository, self.run_id, "search_start", attempt=attempt)
@@ -83,6 +86,7 @@ class WorkflowContext:
     limits: Limits
     search: SearchTool | None = None
     gmail: GmailTool | None = None
+    browser: object | None = None
     read_gmail: bool = False
     sending_enabled: bool = False
     memory_retriever: Callable[[Repository, str, str, Limits], Awaitable[list[MemoryFact]]] | None = None

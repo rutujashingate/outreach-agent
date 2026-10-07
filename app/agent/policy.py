@@ -10,9 +10,9 @@ from app.domain.workflow import ContactDecision, Recipient, Sender, utc_now
 from app.services.limits import Limits
 
 
-def message_fingerprint(sender: Sender, recipient: Recipient, draft: EmailDraft) -> str:
+def message_fingerprint(sender: Sender, recipient: Recipient, draft: EmailDraft, action: str = "none", account_id: str | None = None) -> str:
     # The recipient, sender, and actual message are bound to approval together.
-    content = {"from": {"name": sender.name, "email": sender.email.casefold() if sender.email else None},
+    content = {"action": action, "account_id": account_id, "from": {"name": sender.name, "email": sender.email.casefold() if sender.email else None},
                "to": recipient.email.casefold(),
                "subject": draft.subject, "body": draft.body}
     return sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()

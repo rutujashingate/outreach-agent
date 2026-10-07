@@ -10,7 +10,7 @@ Submit work you created or have permission to contribute under these terms. For 
 
 ## Report a problem or propose an improvement
 
-Open an [issue](https://github.com/rutujashingate/outreach-agent/issues) with what you expected, what happened, steps to reproduce it, and your Python version. Use fictional goals and contacts in examples. For a larger feature, discuss how it fits the CLI V1 and existing workflow before implementing it.
+Open an [issue](https://github.com/rutujashingate/outreach-agent/issues) with what you expected, what happened, steps to reproduce it, and your Python version. Use fictional goals and contacts in examples. For a larger feature, discuss how it fits the shared Telegram/dashboard service and existing workflow before implementing it.
 
 Useful starting points include improving instructions, adding representative evaluation cases, testing provider failures, and strengthening recovery behavior. The README summarizes implemented features; the file guide records the detailed implementation and phase history.
 
@@ -25,10 +25,10 @@ git switch -c improve-outreach
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[dev]'
-python -m app.cli --demo
+python -m app.main --demo
 ```
 
-Python 3.12 or newer is required. The demo uses fictional records and fake services, so it requires no model, search, or Gmail credentials. Run commands from the project folder.
+Python 3.12 or newer is required. Open http://127.0.0.1:8000 and use the demo password shown in the README. The demo uses fictional records and fake services, so it requires no model, search, or Gmail credentials. Run commands from the project folder.
 
 ## Make and check your change
 
@@ -46,6 +46,8 @@ python -m pytest -q
 git diff --check
 git diff
 ```
+
+For browser-connector changes, install Chromium with `python -m playwright install chromium`, then run `RUN_BROWSER_TESTS=1 python -m pytest`. This includes a real-browser fixture without external network calls.
 
 For evaluation changes, also run:
 

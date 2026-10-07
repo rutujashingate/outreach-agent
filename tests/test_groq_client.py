@@ -148,15 +148,16 @@ def test_complete_run_uses_groq_and_resumes_without_another_model_call(make_run_
 
 
 def test_missing_groq_configuration_returns_saved_run_identifier(make_run_manager, monkeypatch):
+    from app.services.runs import ConfigurationError
+    from app.domain.workflow import WorkflowRequest
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     settings = Settings(model_provider="groq", checkpoint_backend="memory")
     setup = make_run_manager(settings=settings)
     setup.manager.client_factory = lambda: real_model_client(settings)
-    with TestClient(create_app(manager=setup.manager)) as api:
-        response = api.post('/runs', json={"goal": "Find research collaborators."})
-        assert response.status_code == 503 and "GROQ_API_KEY" in response.json()["detail"]
-        saved = api.get('/runs/'+response.json()['run_id'])
-        assert saved.status_code == 200 and saved.json()['state']['current_step'] == "failed"
+    with pytest.raises(ConfigurationError) as failure:
+        asyncio.run(setup.manager.start(WorkflowRequest(goal="Find research collaborators.")))
+    saved = setup.manager.get(failure.value.run_id)
+    assert saved.state.current_step == "failed"
 
 
 def test_live_evaluation_selects_groq_with_locally_supplied_responses(monkeypatch):

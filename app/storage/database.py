@@ -6,7 +6,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
 
-from app.storage.models import Base
+from alembic import command
+from alembic.config import Config
+import migrations
 
 
 def create_database(url: str = "sqlite:///:memory:") -> Engine:
@@ -20,5 +22,9 @@ def create_database(url: str = "sqlite:///:memory:") -> Engine:
     engine = create_engine(url, **options)
     # This establishes the initial schema. Later table changes need explicit
     # migrations rather than silently relying on create_all to alter a table.
-    Base.metadata.create_all(engine)
+    config = Config()
+    config.set_main_option("script_location", str(Path(migrations.__file__).parent))
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "head")
     return engine
