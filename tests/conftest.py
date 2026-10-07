@@ -11,14 +11,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models.schemas import (
+from app.domain.schemas import (
     EmailDraft,
     OutreachStrategy,
     Prospect,
     Qualification,
     ReviewResult,
 )
-from app.orchestration.state import OutreachState
+from app.agent.state import OutreachState
 
 
 @pytest.fixture(autouse=True)
@@ -105,7 +105,7 @@ def research_material(records):
 @pytest.fixture
 def workflow_data(records, research_material):
     """A complete six-call script, with evidence and an explicitly supplied address."""
-    from app.models.workflow import WorkflowRequest
+    from app.domain.workflow import WorkflowRequest
     goal = "Find AI startups"
     interpretation = {"raw_goal": goal, "goal_type": "sales", "objective": "Find relevant startups",
         "target_entity": "organization", "target_description": "AI startups",
@@ -123,12 +123,12 @@ def workflow_data(records, research_material):
 def make_run_manager(workflow_data):
     """Build real local graphs with replaceable clients and close test databases."""
     from langgraph.checkpoint.memory import InMemorySaver
-    from app.db.database import create_database
-    from app.memory.repository import Repository
-    from app.models.client import FakeModelClient
-    from app.orchestration.runs import RunManager
+    from app.storage.database import create_database
+    from app.storage.repository import Repository
+    from app.llm.client import FakeModelClient
+    from app.services.runs import RunManager
     from app.settings import Settings
-    from app.tools.gmail import FakeGmailClient
+    from app.connectors.gmail.client import FakeGmailClient
     engines = []
     def make(*, responses=None, client=None, repository=None, settings=None,
              checkpointer=None, gmail=None, search=None):

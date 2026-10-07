@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 # Basic project details, including the minimum supported Python version.
 [project]
 name = "outreach-agent"
-version = "0.2.0"
+version = "0.3.0"
 description = "Goal-driven outreach with sourced research, relationship memory, and human approval."
 readme = "README.md"
 license = "MIT"
@@ -24,9 +24,9 @@ dependencies = [
     "langgraph-checkpoint-sqlite>=3,<4",  # Resume local runs after a restart.
 ]
 
-# The terminal interface also runs with python -m app.cli.
+# Start the service; users interact through Telegram or the dashboard.
 [project.scripts]
-outreach = "app.cli:main"
+outreach-server = "app.main:main"
 
 # The extra packages included by pip install -e '.[dev]' support local tests.
 [project.optional-dependencies]

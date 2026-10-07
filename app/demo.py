@@ -11,16 +11,16 @@ import json
 
 from langgraph.checkpoint.memory import InMemorySaver
 
-from app.db.database import create_database
+from app.storage.database import create_database
 from app.main import create_app
-from app.memory.repository import Repository
-from app.models.client import FakeModelClient
-from app.models.schemas import Prospect
-from app.models.workflow import ApprovalSubmission, SearchResult, Sender, WorkflowRequest
-from app.orchestration.runs import RunManager
+from app.storage.repository import Repository
+from app.llm.client import FakeModelClient
+from app.domain.schemas import Prospect
+from app.domain.workflow import ApprovalSubmission, SearchResult, Sender, WorkflowRequest
+from app.services.runs import RunManager
 from app.settings import Settings
-from app.tools.gmail import FakeGmailClient
-from app.tools.search import FakeSearchTool
+from app.connectors.gmail.client import FakeGmailClient
+from app.connectors.search import FakeSearchTool
 
 DEMO_PROSPECT = Prospect(id="p1", company_name="Example University", decision_maker_name="Ada Example",
     decision_maker_role="Professor", signals=["Studies AI observability"], sources=["https://example.com/lab"])

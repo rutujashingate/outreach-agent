@@ -8,10 +8,10 @@ import json
 import httpx
 import pytest
 
-from app.models.schemas import EmailDraft
-from app.models.workflow import Recipient, SearchResult, Sender
-from app.tools.gmail import GmailClient, contact_messages, encode_message
-from app.tools.search import BraveSearchTool, FakeSearchTool, ToolError
+from app.domain.schemas import EmailDraft
+from app.domain.workflow import Recipient, SearchResult, Sender
+from app.connectors.gmail.client import GmailClient, contact_messages, encode_message
+from app.connectors.search import BraveSearchTool, FakeSearchTool, ToolError
 
 
 def test_search_uses_goal_query_and_preserves_url():

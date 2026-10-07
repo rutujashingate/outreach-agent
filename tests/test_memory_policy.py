@@ -6,18 +6,18 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import create_mock_engine
 
-from app.db.database import create_database
-from app.db.models import Base
-from app.memory.advanced import consolidate, possible_conflicts, semantic_retrieve
-from app.memory.extraction import extract_memories
-from app.memory.repository import Repository
-from app.memory.retrieval import retrieve
-from app.models.client import FakeModelClient, ModelResponseError
-from app.models.workflow import MemoryFact, Recipient, ReplyRequest, utc_now
-from app.orchestration.replies import process_reply
-from app.orchestration.runs import RunConflict
-from app.security.contact_policy import check_contact
-from app.security.limits import Limits
+from app.storage.database import create_database
+from app.storage.models import Base
+from app.agent.components.memory.advanced import consolidate, possible_conflicts, semantic_retrieve
+from app.agent.components.memory.extraction import extract_memories
+from app.storage.repository import Repository
+from app.agent.components.memory.retrieval import retrieve
+from app.llm.client import FakeModelClient, ModelResponseError
+from app.domain.workflow import MemoryFact, Recipient, ReplyRequest, utc_now
+from app.agent.replies import process_reply
+from app.services.runs import RunConflict
+from app.agent.policy import check_contact
+from app.services.limits import Limits
 
 
 def fact(identifier="f1", **changes):

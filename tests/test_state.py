@@ -5,14 +5,14 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from app.models.schemas import (
+from app.domain.schemas import (
     EmailDraft,
     OutreachStrategy,
     Prospect,
     Qualification,
     ReviewResult,
 )
-from app.orchestration.state import OutreachState
+from app.agent.state import OutreachState
 
 
 def test_state_starts_with_empty_results():

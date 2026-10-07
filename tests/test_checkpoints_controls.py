@@ -6,18 +6,18 @@ from copy import deepcopy
 
 import pytest
 
-from app.db.database import create_database
-from app.memory.repository import Repository
-from app.models.client import FakeModelClient, ModelClientError
-from app.models.router import ModelRouter, TaskMeasurement
-from app.models.schemas import Qualification
-from app.models.workflow import ApprovalSubmission, SearchResult
-from app.orchestration.checkpoints import open_checkpointer
-from app.orchestration.context import ManagedModelClient
-from app.orchestration.runs import RunManager
-from app.security.limits import LimitExceeded, Limits
+from app.storage.database import create_database
+from app.storage.repository import Repository
+from app.llm.client import FakeModelClient, ModelClientError
+from app.llm.router import ModelRouter, TaskMeasurement
+from app.domain.schemas import Qualification
+from app.domain.workflow import ApprovalSubmission, SearchResult
+from app.storage.checkpoints import open_checkpointer
+from app.agent.context import ManagedModelClient
+from app.services.runs import RunManager
+from app.services.limits import LimitExceeded, Limits
 from app.settings import Settings
-from app.tools.search import FakeSearchTool
+from app.connectors.search import FakeSearchTool
 
 
 def test_sqlite_checkpoint_resumes_after_closing_and_reopening(tmp_path, workflow_data):
@@ -59,7 +59,7 @@ def test_model_call_limit_survives_retry_and_preserves_failed_checkpoint(make_ru
         # Find the identifier through the persisted execution trace boundary.
         from sqlalchemy import select
         from sqlalchemy.orm import Session
-        from app.db.models import RunRow
+        from app.storage.models import RunRow
         with Session(setup.repository.engine) as session:
             run_id = session.scalar(select(RunRow.id))
         assert setup.manager.get(run_id).state.current_step == "failed"
@@ -143,7 +143,7 @@ def test_parallel_qualification_keeps_results_associated_and_bounds_concurrency(
 
 def test_estimated_budget_accepts_exact_boundary_without_float_rounding_loss(make_run_manager, workflow_data):
     setup = make_run_manager()
-    from app.models.workflow import WorkflowState
+    from app.domain.workflow import WorkflowState
     limits = Limits(max_model_calls=40, estimated_cost_per_call=0.05, max_estimated_cost_per_run=2.0)
     setup.repository.save_run(WorkflowState(run_id="budget", goal="Find prospects"), "running")
     for _ in range(40):
@@ -151,18 +151,6 @@ def test_estimated_budget_accepts_exact_boundary_without_float_rounding_loss(mak
     with pytest.raises(LimitExceeded):
         setup.repository.reserve_call("budget", "model", limits)
     assert setup.repository.run("budget")["model_calls"] == 40
-
-
-def test_original_workflow_can_use_injected_search(make_run_manager, workflow_data):
-    from app.agents.researcher import Researcher
-    from app.orchestration.state import OutreachState
-    from app.orchestration.workflow import run_workflow
-    prospect = workflow_data.responses[1]["prospects"][0]
-    client = FakeModelClient([{"prospects": [prospect]}])
-    search = FakeSearchTool([SearchResult(title=prospect["company_name"], url=prospect["sources"][0], description=str(prospect))])
-    result = asyncio.run(run_workflow(OutreachState(goal=workflow_data.request.goal), researcher=Researcher(client=client, search_tool=search)))
-    assert result.prospects[0].id == "p1"
-    assert len(search.queries) == len(client.calls) == 1
 
 
 def test_parallel_full_preparation_isolates_a_failed_prospect(make_run_manager, workflow_data):

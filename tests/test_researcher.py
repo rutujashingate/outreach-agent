@@ -8,10 +8,10 @@ from unittest.mock import AsyncMock
 from pydantic import ValidationError
 import pytest
 
-from app.agents.researcher import Researcher
-from app.models.client import FakeModelClient, ModelClientError, ModelRefusalError, ModelResponseError
-from app.models.schemas import Prospect, ResearchResult
-from app.prompts.researcher import RESEARCH_INSTRUCTIONS
+from app.agent.components.researcher import Researcher
+from app.llm.client import FakeModelClient, ModelClientError, ModelRefusalError, ModelResponseError
+from app.domain.schemas import Prospect, ResearchResult
+from app.agent.prompts.researcher import RESEARCH_INSTRUCTIONS
 
 
 def run_research(client, material, *, goal="Find AI startups"):
@@ -38,7 +38,7 @@ def test_research_returns_typed_prospects_and_preserves_prompt(records, research
 def test_research_uses_existing_structured_call_boundary(monkeypatch, records, research_material):
     record = ResearchResult(prospects=[records[Prospect]])
     shared_call = AsyncMock(return_value=record)
-    monkeypatch.setattr("app.agents.researcher.generate_structured", shared_call)
+    monkeypatch.setattr("app.agent.components.researcher.generate_structured", shared_call)
     client = FakeModelClient([])
 
     assert run_research(client, research_material) == record.prospects

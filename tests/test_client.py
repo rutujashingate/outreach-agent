@@ -14,7 +14,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 import pytest
 
-from app.models.client import (
+from app.llm.client import (
     FakeModelClient,
     ModelClientError,
     ModelRefusalError,
@@ -22,7 +22,7 @@ from app.models.client import (
     OpenAIModelClient,
     generate_structured,
 )
-from app.models.schemas import (
+from app.domain.schemas import (
     EmailDraft,
     OutreachStrategy,
     Prospect,
@@ -247,7 +247,7 @@ def test_real_client_requires_explicit_configuration(monkeypatch):
 def test_owned_sdk_is_closed_after_context(monkeypatch):
     sdk = SimpleNamespace(close=AsyncMock())
     factory = Mock(return_value=sdk)
-    monkeypatch.setattr("app.models.client.AsyncOpenAI", factory)
+    monkeypatch.setattr("app.llm.client.AsyncOpenAI", factory)
     monkeypatch.setenv("OPENAI_MODEL", "test-model")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 

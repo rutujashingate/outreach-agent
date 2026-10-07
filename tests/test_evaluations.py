@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from app.models.workflow import WorkflowState
+from app.domain.workflow import WorkflowState
 from evals.run import evaluate
 from evals.scoring import score_run
 

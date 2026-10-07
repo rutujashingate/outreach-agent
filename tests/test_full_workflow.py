@@ -6,15 +6,15 @@ from copy import deepcopy
 from langgraph.runtime import Runtime
 import pytest
 
-from app.models.client import FakeModelClient
-from app.models.workflow import ApprovalSubmission
-from app.orchestration.context import WorkflowContext
-from app.orchestration.nodes.external import external_node
-from app.orchestration.runs import RunConflict
-from app.security.limits import Limits
+from app.llm.client import FakeModelClient
+from app.domain.workflow import ApprovalSubmission
+from app.agent.context import WorkflowContext
+from app.agent.nodes.external import external_node
+from app.services.runs import RunConflict
+from app.services.limits import Limits
 from app.settings import Settings
-from app.tools.gmail import FakeGmailClient
-from app.tools.search import ToolError
+from app.connectors.gmail.client import FakeGmailClient
+from app.connectors.search import ToolError
 
 
 def decide(response, action="approve", **changes):
@@ -257,7 +257,7 @@ def test_duplicate_recipient_in_one_run_gets_only_one_draft(make_run_manager, wo
 
 def test_gmail_opt_out_is_loaded_before_writing(make_run_manager, workflow_data):
     import base64
-    from app.models.workflow import utc_now
+    from app.domain.workflow import utc_now
     gmail = FakeGmailClient({"t1": {"messages": [{"id": "m1", "internalDate": str(int(utc_now().timestamp() * 1000)),
         "payload": {"mimeType": "text/plain", "headers": [{"name": "From", "value": "contact@example.com"},
         {"name": "To", "value": "user@example.com"}], "body": {"data": base64.urlsafe_b64encode(b"Please unsubscribe me.").decode()}}}]}})
@@ -270,7 +270,7 @@ def test_gmail_opt_out_is_loaded_before_writing(make_run_manager, workflow_data)
 
 
 def test_person_only_prospect_does_not_require_an_invented_organization():
-    from app.agents.researcher import Researcher
+    from app.agent.components.researcher import Researcher
     person = {"id": "p1", "entity_type": "person", "company_name": "Ada Example", "sources": ["https://example.com/ada"]}
     client = FakeModelClient([{"prospects": [person]}])
     result = asyncio.run(Researcher(client=client).research(goal="Find open-source maintainers for networking",

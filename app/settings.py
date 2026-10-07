@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.security.limits import Limits
+from app.services.limits import Limits
 
 
 class Settings(BaseModel):

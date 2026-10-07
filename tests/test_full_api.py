@@ -5,7 +5,7 @@ import pytest
 
 from app.main import create_app
 from app.settings import Settings
-from app.security.limits import Limits
+from app.services.limits import Limits
 
 
 def decision_body(response, action="approve"):
@@ -78,7 +78,6 @@ def test_api_key_protects_runs_and_memory_and_legacy_endpoint(make_run_manager, 
     with TestClient(create_app(manager=setup.manager)) as client:
         for path in ("/runs/" + "f" * 32, "/contacts/contact@example.com"):
             assert client.get(path).status_code == 401
-        assert client.post("/outreach", json={"goal": "A goal"}).status_code == 401
         assert client.post("/runs", json=workflow_data.request.model_dump(mode="json"),
                            headers={"X-API-Key": "test-only-key"}).status_code == 201
 

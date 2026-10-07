@@ -10,10 +10,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.models.client import FakeModelClient, ModelClientError, ModelRefusalError, ModelResponseError, generate_structured
-from app.models.groq_client import DEFAULT_GROQ_MODEL, GroqModelClient
-from app.models.schemas import Qualification
-from app.orchestration.runs import real_model_client
+from app.llm.client import FakeModelClient, ModelClientError, ModelRefusalError, ModelResponseError, generate_structured
+from app.llm.groq_client import DEFAULT_GROQ_MODEL, GroqModelClient
+from app.domain.schemas import Qualification
+from app.services.runs import real_model_client
 from app.settings import Settings
 
 
@@ -131,13 +131,13 @@ def test_complete_run_uses_groq_and_resumes_without_another_model_call(make_run_
     def groq_factory(**kwargs):
         factory_calls.append(kwargs)
         return client
-    monkeypatch.setattr("app.orchestration.runs.GroqModelClient.from_env", groq_factory)
+    monkeypatch.setattr("app.services.runs.GroqModelClient.from_env", groq_factory)
     setup.manager.client_factory = lambda: real_model_client(settings)
     async def exercise():
         response = await setup.manager.start(workflow_data.request)
         assert response.awaiting_approval and len(client.calls) == 6
         approval = response.state.approval_requests[0]
-        from app.models.workflow import ApprovalSubmission
+        from app.domain.workflow import ApprovalSubmission
         response = await setup.manager.resume(response.state.run_id, ApprovalSubmission(decisions=[{
             "prospect_id": "p1", "version": approval.version, "fingerprint": approval.fingerprint, "action": "approve",
         }]))
@@ -145,20 +145,6 @@ def test_complete_run_uses_groq_and_resumes_without_another_model_call(make_run_
     asyncio.run(exercise())
     assert factory_calls == [{"max_output_tokens": settings.limits.max_output_tokens, "timeout": settings.limits.model_timeout}]
     client.aclose.assert_awaited_once()
-
-
-def test_research_endpoint_uses_the_configured_groq_provider(make_run_manager, workflow_data, monkeypatch):
-    setup = make_run_manager(settings=Settings(model_provider="groq", checkpoint_backend="memory"))
-    client = FakeModelClient([workflow_data.responses[1]])
-    @asynccontextmanager
-    async def ready_client():
-        yield client
-    monkeypatch.setattr("app.api.outreach.GroqModelClient.from_env", ready_client)
-    with TestClient(create_app(manager=setup.manager)) as api:
-        response = api.post('/outreach', json={"goal": workflow_data.request.goal,
-                                              "research_material": workflow_data.request.research_material})
-    assert response.status_code == 200 and response.json()["prospects"][0]["id"] == "p1"
-    assert len(client.calls) == 1
 
 
 def test_missing_groq_configuration_returns_saved_run_identifier(make_run_manager, monkeypatch):
@@ -186,7 +172,7 @@ def test_live_evaluation_selects_groq_with_locally_supplied_responses(monkeypatc
         client.aclose = AsyncMock()
     waiting = iter(clients)
     monkeypatch.setenv('OUTREACH_MODEL_PROVIDER', 'groq')
-    monkeypatch.setattr('app.orchestration.runs.GroqModelClient.from_env', lambda **kwargs: next(waiting))
+    monkeypatch.setattr('app.services.runs.GroqModelClient.from_env', lambda **kwargs: next(waiting))
     report = asyncio.run(evaluate(live=True))
     assert report['mode'] == 'live_model' and len(report['results']) == 4
     assert all(len(client.calls) == 6 for client in clients)

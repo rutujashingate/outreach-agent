@@ -5,8 +5,8 @@ targets, source retention, selected IDs, concise writing, and workflow rules.
 Human assessment is still needed for subtle factual and tone judgments.
 """
 
-from app.models.workflow import WorkflowState
-from app.security.contact_policy import message_fingerprint
+from app.domain.workflow import WorkflowState
+from app.agent.policy import message_fingerprint
 
 
 def overlap(expected: set, actual: set) -> float:
