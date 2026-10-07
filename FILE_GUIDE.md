@@ -159,6 +159,10 @@ After the V1 CLI work, we rewrote `README.md` for someone meeting the project fo
 
 **Checks for the documentation update:** the terminal demo reached approval, accepted a decision, recorded a fake draft, displayed events, and exited. Both fake-client examples in the integration guide ran successfully without credentials. All 154 local links and heading references were checked, and the code fences and Git whitespace checks passed. The previously passing 360-test suite remains the application verification record; this update changes documentation only.
 
+A later explanation update expands the phase 25 evaluation files and the phase 5 search adapter below. It explains what each function receives and returns, why simulation scores do not establish real model quality, and how optional Brave results become evidence for research. It also separates search from model reasoning and documents the limits of snippet-based evidence. This adds reading guidance without changing workflow behavior.
+
+**Checks for the explanation update:** the documented simulation command produced a JSON report with four cases, ten scores per case, and six fake model attempts per case without credentials. All 161 local links and heading references passed, code fences are balanced, and Git's whitespace check passed. The report was created in a temporary directory so existing local evaluation reports were preserved.
+
 ### V1 interface follow-up: Interact through the CLI
 
 You chose the terminal for V1 so we can try real goals and configured keys before building other interfaces. This reuses the existing work: phase 3's model client, phase 9's relationship database, phase 16's saved progress, phases 17–18's approval flow, and phase 27's limits/recovery.
@@ -320,6 +324,76 @@ Paths in this table are actual files in the repository. The phase column explain
 | [evals/cases.json](evals/cases.json) | 25 | Four reference examples: academic, job, sales, and networking goals, expected targets, sources, and writing constraints. |
 | [evals/scoring.py](evals/scoring.py) | 25 | Compares a run with its reference and reports component scores. Missing drafts and deliberate regressions lower the appropriate scores. |
 | [evals/run.py](evals/run.py) | 25 | Runs the examples locally by default; `--live` explicitly opts into the configured model while Gmail remains unused. |
+
+## Understanding the evaluation files: Phase 25
+
+An evaluation is a repeatable example used to compare the workflow's result with an expected result. Think of the `evals` folder as a report card: it helps us see which parts satisfy the example's requirements after changing a prompt, model, or workflow. The automated tests check that the code and scoring behave correctly; the evaluations report how a complete run compares with a reference example.
+
+### `evals/cases.json`: The questions and expected answers
+
+This file contains four fictional scenarios: academic, jobs, sales, and networking. Each scenario specifies the goal, its expected category, the target names, which targets should qualify, permitted source references, a personalization topic, forbidden claims, and a word limit. These are small reference examples, not a list of real people to contact.
+
+For example, the academic case expects `Example University` and the topic `AI observability`. It limits the draft to 180 words and forbids the claim `published ten papers`. If the model adds that exact claim, the writing check fails. The check does not detect every possible invented claim; it checks the phrases listed in the case.
+
+### `evals/run.py`: Run the examples and collect a report
+
+| Function | Input | Output |
+|---|---|---|
+| `case_request` | One scenario from `cases.json`. | A `WorkflowRequest` with a short research note, source, and fictional recipient. |
+| `scripted_client` | One scenario. | A fake client with six preset responses: goal interpretation, research, qualification, strategy, draft, and review. |
+| `evaluate` | `live=False` by default, or explicit `live=True`. | A report containing the mode and each case's scores, duration, model-attempt count, estimated cost, and recorded prospect failures. |
+| `main` | Optional `--live` and `--output` command arguments. | Prints the report as JSON and optionally saves it to the selected file. |
+
+The runner creates temporary in-memory relationship storage and checkpoints for each case. It uses the existing `RunManager` and complete graph rather than implementing a separate workflow. The starter cases run through drafting and automated review, then stop at the human approval pause. The runner does not approve the messages or create Gmail drafts.
+
+Run the simulation from the project folder with the environment active:
+
+```bash
+python -m evals.run --output .data/evaluations.json
+```
+
+This makes no external requests and needs no credentials. Its six responses per case are already prepared to match the expected results. A score of `1.0` demonstrates the behavior of the workflow and scorer on those preset answers; it does not establish the quality of a real model. The `estimated_cost` field uses the configured reservation per attempt, even for fake calls. No money is charged for those simulated calls.
+
+To evaluate the configured Groq model after loading your settings:
+
+```bash
+OUTREACH_READ_GMAIL=false python -m evals.run --live --output .data/groq-evaluations.json
+```
+
+Live mode uses real model calls and can consume credits. It uses the supplied fictional notes, with no Brave search or Gmail tools. Disable Gmail reading for this command because the evaluation runner does not supply a Gmail client. Missing credentials or a top-level execution error can stop the command before a complete report is produced.
+
+### `evals/scoring.py`: Compare the result with the reference
+
+`score_run(state, reference)` receives the workflow's saved result and the scenario's expected values. It returns ten scores between zero and one. These cover the goal category, target names, source references, qualified targets, memory quotes and IDs, personalization topic, writing constraints, reviewer decision, and selected workflow rules.
+
+`overlap(expected, actual)` compares two sets, such as expected targets and returned targets. Matching sets score `1.0`; no shared entries score `0.0`. Partial overlap gives a score between those values. For example, expecting only `Example University` but returning it plus an unrelated organization gives `0.5`.
+
+The scorer checks the listed references and constraints, not all factual accuracy or tone. Some checks score `1.0` when there is nothing to inspect. The current cases expect no remembered facts and perform no post-approval action, so their memory and action checks do not establish coverage of those paths. Separate workflow tests exercise approval and external-action behavior. More representative cases and human assessment are needed for a useful quality benchmark.
+
+### `evals/__init__.py` and the evaluation tests
+
+`evals/__init__.py` marks the folder as a Python package, allowing `python -m evals.run` and imports such as `from evals.scoring import score_run`. It contains no workflow logic.
+
+`tests/test_evaluations.py` checks that all four cases run without services, missing results receive the expected failing scores, listed unsupported claims and wrong sources reduce scores, and exceeding the revision allowance fails the workflow-rule check. These tests make sure the report card can notice those deliberate mistakes.
+
+## Why the researcher uses Brave Search: Phase 5
+
+Search collects evidence; the model interprets that evidence. Our configured model adapter sends prompts and receives structured records. It does not independently browse websites. Brave was added as the first search provider so a user can request web research instead of manually gathering every note.
+
+The current search adapter calls Brave's Web Search endpoint and keeps each result's title, URL, and description snippet together. The researcher combines those results with any user-supplied notes, asks the model to produce prospect records, and checks that returned names and source references occur in that material. Brave documents this response format in its [Web Search guide](https://api-dashboard.search.brave.com/app/documentation/web-search/get-started).
+
+The path is:
+
+```text
+Goal -> search query -> Brave titles, URLs, and snippets
+     -> researcher and model -> validated prospects -> qualification
+```
+
+For example, a goal about AI observability can produce a query using its target description and research signals. A returned lab-page URL and snippet become evidence available to the researcher. The URL is retained with the prospect so the user can inspect the source.
+
+In `app/tools/search.py`, `SearchTool` describes the shared `search(query)` interface, meaning the method every search provider must offer. `BraveSearchTool.search` receives text and returns a list of validated `SearchResult` records. `FakeSearchTool.search` returns supplied local examples and records the queries for tests. `app/orchestration/nodes/discovery.py` supplies the configured search tool only when `use_search` is true; otherwise the researcher uses the user's notes.
+
+Brave is optional and replaceable. The current implementation makes no claim that it is the cheapest or best provider. Another adapter can implement the same interface without rewriting the researcher or graph. V1 bounds search attempts and result counts. It uses search snippets rather than downloading every result's full page, so a retained source URL does not by itself prove every claim. Review the evidence before using a draft.
 
 ## Main complete-workflow functions
 
