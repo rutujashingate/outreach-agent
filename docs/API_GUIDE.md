@@ -1,6 +1,6 @@
 # API and Integration Guide
 
-V1 is an interactive terminal application. This guide is for developers using the optional HTTP API, changing provider settings, or exploring the shared model client. Start with the [README](../README.md) for the product overview, diagrams, CLI setup, and SQLite explanation. The [file guide](../FILE_GUIDE.md) explains the implementation file by file.
+V1 is an interactive terminal application. This guide is for developers using the optional HTTP API, changing provider settings, or exploring the shared model client. Start with the [README](../README.md) for implemented features, the workflow image, and CLI setup. The [file guide](../FILE_GUIDE.md) explains the implementation file by file.
 
 ## Start the optional API
 

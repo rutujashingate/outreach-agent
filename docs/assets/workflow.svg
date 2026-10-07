@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="350" viewBox="0 0 800 350" role="img" aria-labelledby="title description">
+  <title id="title">Outreach workflow</title>
+  <desc id="description">The main path for a prospect that qualifies and receives approval: goal and inputs, research, qualification, relationship checks, strategy and draft, automated review, human decision, and an approved result. Gmail draft creation requires approval.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#64748b"/></marker>
+  </defs>
+  <rect width="800" height="350" rx="12" fill="#ffffff"/>
+  <g fill="none" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)">
+    <path d="M 200 76 H 214"/><path d="M 392 76 H 406"/><path d="M 584 76 H 598"/>
+    <path d="M 688 128 V 162 H 112 V 196"/>
+    <path d="M 200 250 H 214"/><path d="M 392 250 H 406"/><path d="M 584 250 H 598"/>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <g>
+      <rect x="24" y="24" width="176" height="104" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+      <text x="38" y="45" fill="#475569" font-size="11" font-weight="700">STEP 1</text>
+      <text x="38" y="67" fill="#0f172a" font-size="15" font-weight="700">Goal &amp; inputs</text>
+      <text x="38" y="90" fill="#334155" font-size="12">Goal, background,</text>
+      <text x="38" y="108" fill="#334155" font-size="12">evidence, addresses</text>
+    </g>
+    <g>
+      <rect x="216" y="24" width="176" height="104" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+      <text x="230" y="45" fill="#475569" font-size="11" font-weight="700">STEP 2</text>
+      <text x="230" y="67" fill="#0f172a" font-size="15" font-weight="700">Research</text>
+      <text x="230" y="90" fill="#334155" font-size="12">Notes or Brave search</text>
+      <text x="230" y="108" fill="#334155" font-size="12">Prospects with sources</text>
+    </g>
+    <g>
+      <rect x="408" y="24" width="176" height="104" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+      <text x="422" y="45" fill="#475569" font-size="11" font-weight="700">STEP 3</text>
+      <text x="422" y="67" fill="#0f172a" font-size="15" font-weight="700">Qualification</text>
+      <text x="422" y="90" fill="#334155" font-size="12">Score relevance</text>
+      <text x="422" y="108" fill="#334155" font-size="12">Select matching targets</text>
+    </g>
+    <g>
+      <rect x="600" y="24" width="176" height="104" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+      <text x="614" y="45" fill="#475569" font-size="11" font-weight="700">STEP 4</text>
+      <text x="614" y="67" fill="#0f172a" font-size="15" font-weight="700">Relationship check</text>
+      <text x="614" y="90" fill="#334155" font-size="12">Read saved context</text>
+      <text x="614" y="108" fill="#334155" font-size="12">Apply contact rules</text>
+    </g>
+    <g>
+      <rect x="24" y="198" width="176" height="104" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+      <text x="38" y="219" fill="#475569" font-size="11" font-weight="700">STEP 5</text>
+      <text x="38" y="241" fill="#0f172a" font-size="15" font-weight="700">Strategy &amp; draft</text>
+      <text x="38" y="264" fill="#334155" font-size="12">Choose an approach</text>
+      <text x="38" y="282" fill="#334155" font-size="12">Write the message</text>
+    </g>
+    <g>
+      <rect x="216" y="198" width="176" height="104" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+      <text x="230" y="219" fill="#475569" font-size="11" font-weight="700">STEP 6</text>
+      <text x="230" y="241" fill="#0f172a" font-size="15" font-weight="700">Automated review</text>
+      <text x="230" y="264" fill="#334155" font-size="12">Check the draft</text>
+      <text x="230" y="282" fill="#334155" font-size="12">Bounded revisions</text>
+    </g>
+    <g>
+      <rect x="408" y="198" width="176" height="104" rx="10" fill="#fff7ed" stroke="#fed7aa"/>
+      <text x="422" y="219" fill="#475569" font-size="11" font-weight="700">STEP 7</text>
+      <text x="422" y="241" fill="#0f172a" font-size="15" font-weight="700">Your decision</text>
+      <text x="422" y="264" fill="#334155" font-size="12">Approve, reject, edit</text>
+      <text x="422" y="282" fill="#334155" font-size="12">Or leave the run paused</text>
+    </g>
+    <g>
+      <rect x="600" y="198" width="176" height="104" rx="10" fill="#f0fdf4" stroke="#bbf7d0"/>
+      <text x="614" y="219" fill="#475569" font-size="11" font-weight="700">STEP 8</text>
+      <text x="614" y="241" fill="#0f172a" font-size="15" font-weight="700">Approved result</text>
+      <text x="614" y="264" fill="#334155" font-size="12">Record the approval</text>
+      <text x="614" y="282" fill="#334155" font-size="12">Or create a Gmail draft</text>
+    </g>
+    <text x="400" y="151" text-anchor="middle" fill="#475569" font-size="12">Continue with eligible prospects</text>
+    <text x="400" y="329" text-anchor="middle" fill="#475569" font-size="13">Gmail actions require approval of the current draft.</text>
+  </g>
+</svg>

@@ -12,7 +12,7 @@ Submit work you created or have permission to contribute under these terms. For 
 
 Open an [issue](https://github.com/rutujashingate/outreach-agent/issues) with what you expected, what happened, steps to reproduce it, and your Python version. Use fictional goals and contacts in examples. For a larger feature, discuss how it fits the CLI V1 and existing workflow before implementing it.
 
-Useful starting points include improving instructions, adding representative evaluation cases, testing provider failures, and strengthening recovery behavior. The README distinguishes working features from integration checks and future work.
+Useful starting points include improving instructions, adding representative evaluation cases, testing provider failures, and strengthening recovery behavior. The README summarizes implemented features; the file guide records the detailed implementation and phase history.
 
 ## Set up your local copy
 
