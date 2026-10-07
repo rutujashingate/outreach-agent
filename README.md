@@ -18,9 +18,9 @@ A Python outreach assistant that turns a goal and supporting evidence into resea
 
 ## Workflow
 
-![Outreach workflow: inputs, research, qualification, relationship checks, drafting, review, human decision, and approved result](docs/assets/workflow.svg)
+![Architecture flowchart: goal, CLI or API, state, workflow coordinator, interpretation, research, prospects, qualification, memory, contact policy, strategy, writer, reviewer, human approval, optional Gmail action, outcome, and memory update](docs/assets/workflow.svg)
 
-The diagram shows the main path for a prospect that qualifies and receives approval. The CLI can record an approved result or create a Gmail draft.
+This follows the [architecture and phases](plan.md#remaining-phases), including stop paths, bounded revisions, and pause/resume. Rewrites and edits share one revision. The CLI supports approved Gmail drafts; API sending requires explicit enablement. Tests and evals check the workflow separately.
 
 ## Quick start
 

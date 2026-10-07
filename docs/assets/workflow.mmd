@@ -1,0 +1,71 @@
+---
+config:
+  theme: base
+  fontFamily: Arial
+  themeCSS: 'text, tspan { font-family: Arial, Helvetica, sans-serif !important; }'
+  themeVariables:
+    fontFamily: Arial, Helvetica, sans-serif
+    fontSize: 15px
+    primaryColor: "#eff6ff"
+    primaryBorderColor: "#94a3b8"
+    primaryTextColor: "#0f172a"
+    lineColor: "#64748b"
+    edgeLabelBackground: "#ffffff"
+  flowchart:
+    htmlLabels: false
+    curve: linear
+    nodeSpacing: 20
+    rankSpacing: 16
+    padding: 8
+    wrappingWidth: 280
+---
+flowchart TD
+    accTitle: Outreach workflow from the architecture and implemented phases
+    accDescr: A user goal enters through the CLI or API, becomes workflow state, and is coordinated by RunManager and LangGraph. Goal interpretation, research, prospects, qualification, memory checks, contact policy, strategy, writing, review, human approval, optional Gmail action, outcome, and memory update follow in order. Qualification and contact policy can stop outreach. Rewrites and human edits share one revision. Approval can reject, edit, pause, or proceed. Gmail can create a draft or send only when sending is explicitly enabled. Relationship history is saved for later runs. Checkpoints, tracing, security, and operating limits support execution; tests and evaluations check it separately.
+
+    goal([USER GOAL]) --> entry[CLI or API]
+    entry --> state[WORKFLOW STATE]
+    state --> manager["WORKFLOW COORDINATOR<br/>RunManager + LangGraph"]
+    manager --> interpretation[GOAL INTERPRETATION]
+    interpretation --> researcher[RESEARCHER]
+    evidence["Supplied notes<br/>or optional Brave search"] -. Evidence .-> researcher
+    researcher --> prospects[PROSPECTS + SOURCES]
+    prospects --> qualifier{"QUALIFIER<br/>Relevant to the goal?"}
+    qualifier -->|Qualified| memory[MEMORY CHECK]
+    qualifier -->|No matches| outcome[OUTCOME]
+    memory --> policy{"CONTACT POLICY<br/>Outreach allowed?"}
+    policy -->|Allowed| strategy[OUTREACH STRATEGY]
+    policy -->|Blocked| outcome
+    strategy --> writer[WRITER]
+    writer --> reviewer{"REVIEWER<br/>Draft passes?"}
+    reviewer -->|Pass| approval{"HUMAN APPROVAL"}
+    reviewer -->|Fail; revision available| writer
+    reviewer -->|Revision exhausted| outcome
+    approval -->|Reject| outcome
+    approval -->|Edit within limit; review again| reviewer
+    approval -->|Edit limit reached| outcome
+    approval -->|Later| pause["SAVED CHECKPOINT<br/>Run stays paused"]
+    pause -->|Resume same run| approval
+    approval -->|Approve current message| action{"GMAIL ACTION REQUESTED?"}
+    action -->|No; record approval| outcome
+    action -->|Yes| gmail["GMAIL ACTION<br/>Draft; send only if explicitly enabled<br/>Recheck approval, policy and duplicates"]
+    gmail --> outcome
+    outcome --> update["MEMORY UPDATE<br/>Save outcome and interaction history"]
+    update --> finish([END])
+
+    history[(SQLite relationship history)] -. Retrieve .-> memory
+    update -. Save .-> history
+
+    controls["Execution controls<br/>Checkpoints · tracing · security<br/>Call / cost limits · timeouts<br/>Tests and evals validate separately"] -. Support .-> manager
+
+    %% Tests and evals validate this flow separately; they are not runtime nodes.
+    %% The one revision is shared by automatic rewrites and human edits.
+    %% CLI actions are none or draft. Sending is a separate guarded API option.
+    classDef component fill:#eff6ff,stroke:#94a3b8,color:#0f172a;
+    classDef decision fill:#fff7ed,stroke:#fdba74,color:#0f172a;
+    classDef storage fill:#f0fdf4,stroke:#86efac,color:#0f172a;
+    classDef support fill:#f8fafc,stroke:#cbd5e1,color:#334155;
+    class goal,entry,state,manager,interpretation,researcher,prospects,memory,strategy,writer,gmail component;
+    class qualifier,policy,reviewer,approval,action decision;
+    class outcome,update,history,finish storage;
+    class evidence,controls,pause support;
