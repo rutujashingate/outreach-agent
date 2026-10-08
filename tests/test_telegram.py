@@ -46,15 +46,19 @@ def test_new_bot_instance_continues_saved_conversation(make_run_manager):
     asyncio.run(exercise())
 
 
-def test_guided_telegram_browser_gmail_flow_and_dashboard_shared_choices(tmp_path):
+@pytest.mark.parametrize('source_mode', ['public', 'file'])
+def test_guided_telegram_browser_gmail_flow_and_dashboard_shared_choices(tmp_path, source_mode):
     from app.demo import build_demo_manager
-    settings=Settings(checkpoint_backend='memory',demo=True,telegram_owner_id=123)
+    settings=Settings(data_dir=tmp_path,checkpoint_backend='memory',demo=True,telegram_owner_id=123)
     manager=build_demo_manager(settings=settings);service=AgentService(manager);client=FakeTelegram();bot=TelegramBot(service,client)
     counter=0
-    async def dispatch(text=None, button=None):
+    async def dispatch(text=None, button=None, file=False):
         nonlocal counter
         counter+=1
         update=incoming(counter,text) if button is None else callback(counter,button)
+        if file:
+            update['message'].pop('text', None)
+            update['message']['document']={'file_id':'notes','file_name':'notes.txt'}
         bot.store.accept_updates([update],123);await bot.process_one()
         while await bot.deliver_one(): pass
     def button(title):
@@ -65,11 +69,21 @@ def test_guided_telegram_browser_gmail_flow_and_dashboard_shared_choices(tmp_pat
         raise AssertionError(f'Missing button {title}')
     async def check():
         await dispatch('/new');await dispatch('Find professors studying AI observability');await dispatch('I am exploring PhD supervision.')
-        await dispatch(button=button('Public URLs'));await dispatch('https://example.com/lab');await dispatch('-')
+        if source_mode == 'file':
+            client.files['notes']=b'Example University. Ada Example studies AI observability. https://example.com/lab'
+            await dispatch(file=True)
+            await dispatch(button=button('Use as research'))
+            await dispatch(button=button('Uploaded files'))
+            await dispatch('Example University | professor@example.com')
+        else:
+            await dispatch(button=button('Public URLs'));await dispatch('https://example.com/lab');await dispatch('-')
         await dispatch(button=button('Gmail draft'));await dispatch(button=button('Start run'))
         runs=service.list_runs()['items'];assert len(runs)==1
         run_id=runs[0]['run_id'];assert service.manager.repository.run(run_id)['status']=='queued'
+        if source_mode == 'file': await service.execute_one()  # Reading is queued before outreach.
         await service.execute_one(); assert service.state(run_id).awaiting_approval
+        if source_mode == 'file':
+            assert service.state(run_id).state.documents[0].filename == 'notes.txt'
         await dispatch('/review '+run_id)
         approve=button('Approve draft');await dispatch(button=approve)
         assert service.details(run_id)['choices']['p1']['action']=='approve'

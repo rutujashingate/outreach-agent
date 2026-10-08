@@ -1,4 +1,21 @@
-# Local validation — October 7, 2026
+# Local validation
+
+## File reading — October 8, 2026
+
+| Check | Result |
+|---|---|
+| Automated suite | **358 passed** with `RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 python -m pytest -o addopts='' -q`. Includes 31 file-related checks and all retained outreach checks. No provider credentials or external API calls. |
+| Real local extraction | Read native two-page PDFs, DOCX/ODT text, HTML, and text formats. Installed Tesseract and read both a PNG and a scanned PDF. Verified page references, text limits, malformed input, and missing-OCR errors. |
+| Durable jobs and boundaries | Checked duplicate uploads, interrupted-job retry, owner authentication, oversized uploads, Telegram owner filtering, bounded downloads, large Unicode subprocess output, parser cancellation, and excluded provider credentials. Background evidence survives checkpoint serialization. |
+| File-to-search flow | An uploaded source reached goal interpretation, a search query, sourced prospects, and human approval using fake external services. Email addresses found in private files required owner selection. Shortened input kept complete source references. A full fake Telegram upload conversation completed approval and one fake Gmail draft. |
+| Dashboard walkthrough | Real Chromium uploaded a two-page PDF, previewed extracted sections, started document-only research, and approved one simulated Gmail draft. The saved run retained both pages and used the original six model calls. Desktop and 390-pixel mobile views were inspected; no JavaScript errors or horizontal overflow. |
+| Simulated evaluations | All four existing outreach scenarios passed every reference check with six scripted model calls each. |
+| Installed package | Built a wheel, installed it into a fresh Python 3.12 environment, and ran outside the repository. The installed worker read native/scanned PDFs, PNG, and DOCX; reopened storage retained all four ready records. |
+| Documentation | Updated supported formats, OCR installation, upload API, phase/file guide, and the actual workflow diagram. |
+
+Manual checks used isolated temporary storage and fictional files. File extraction and browser UI interaction were real; search/model/Gmail responses were simulated. Existing credentials and application data were preserved. Live Telegram file delivery and live model interpretation of uploaded material still need the configured account checks below.
+
+## Connected application — October 7, 2026
 
 The connected application is implemented and its local flow is verified. The checks below distinguish real local execution from simulated external services.
 

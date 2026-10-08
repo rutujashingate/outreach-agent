@@ -10,13 +10,17 @@ Replace the old CLI and research-only entry points with one application shared b
 4. **Dashboard:** statistics, account status, run details, sources, drafts, logs, approvals, cancellation, retries, and queue controls using the same service as Telegram.
 5. **Validate and package:** schema migrations, restart recovery, health, single-instance protection, Docker packaging, accurate guides, and verified commits.
 
+## Implemented file-reading extension
+
+Telegram and dashboard goals accept PDFs, images/scans, DOCX/ODT, and supported text files. Durable jobs extract text locally with PDFium and Tesseract OCR. Files marked background personalize the goal/messages; research files supply cited evidence. The existing interpretation call uses relevant file details to guide search. Saved filename/page references, visible extraction limits, owner confirmation for file-origin email addresses, and restart/retry behavior are included. See [file setup](docs/SETUP.md#read-files-and-use-them-for-research) and phase 37 in the [file guide](FILE_GUIDE.md).
+
 ## Acceptance
 
 Telegram goal → public browser research → qualification and contact checks → strategy and reviewed draft → current human approval → Gmail action → saved outcome. The dashboard shows the same run. Restarting preserves pending approvals without duplicate actions. Automated tests require no live services. Live integration checks are recorded separately and require configured accounts.
 
 ## Verification status
 
-The new service, connectors, dashboard, migrations, and Docker configuration are implemented. All 327 automated checks pass, including a real local Chromium fixture. The four simulated evaluation scenarios pass. A fresh installed package was started outside the repository and resumed a saved approval after restart without repeating research or a Gmail action.
+The new service, connectors, dashboard, migrations, and Docker configuration are implemented. All 358 automated checks pass, including real local Chromium, image OCR, and scanned-PDF fixtures. The four simulated evaluation scenarios pass. A fresh installed package was started outside the repository and resumed a saved approval after restart without repeating research or a Gmail action.
 
 Real Telegram delivery, Google consent and Gmail draft/send checks, live model quality, and Docker execution remain environment checks. No live Google account was connected or messaged during implementation, and Docker is unavailable on this machine. Details are recorded in [local validation](docs/VALIDATION.md).
 

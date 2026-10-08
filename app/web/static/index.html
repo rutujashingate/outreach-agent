@@ -99,6 +99,29 @@
             maxlength="100000"
           ></textarea>
         </label>
+        <fieldset class="upload-box">
+          <legend>Files for this goal</legend>
+          <p class="muted">
+            PDFs, images, DOCX/ODT and text files. Up to five files, 10 MiB
+            each, 20 pages each. Image text uses local OCR.
+          </p>
+          <label
+            >Use new files as<select id="file-purpose">
+              <option value="research">Research evidence</option>
+              <option value="background">
+                My background (for example, a resume)
+              </option>
+            </select></label
+          >
+          <label
+            >Add documents or images<input
+              id="document-input"
+              type="file"
+              multiple
+              accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp,.docx,.odt,.txt,.md,.csv,.json,.log,.html,.htm,.xml,.yaml,.yml,.rst,.tex"
+          /></label>
+          <div id="upload-list" aria-live="polite"></div>
+        </fieldset>
         <div class="checks">
           <label><input type="checkbox" name="search" /> Search the web</label
           ><label
@@ -145,6 +168,13 @@
           ><button id="close-edit" type="button">Cancel</button>
         </div>
       </form>
+    </dialog>
+    <dialog id="document-dialog">
+      <div class="dialog-heading">
+        <h2 id="document-title">Extracted file</h2>
+        <button type="button" id="close-document">Close</button>
+      </div>
+      <div id="document-content"></div>
     </dialog>
   </body>
 </html>

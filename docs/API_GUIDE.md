@@ -16,6 +16,10 @@ Use a stable `Idempotency-Key` header for each intended queued action. Repeating
 |---|---|
 | `GET /health` | Public service liveness: 200 `ok`, or 503 if a background task stopped. No private data. |
 | `GET /` | Dashboard login shell; data requires authentication. |
+| `POST /api/documents?filename=notes.pdf` | Upload raw file bytes, save an extraction job, and return 202 with `{document, job}`. |
+| `GET /api/documents?page=1` | List saved file metadata, 20 records per page. Optional `ids=ID1,ID2` looks up at most five references. |
+| `GET /api/documents/{id}` | Inspect saved metadata, extraction status, pages, warnings, or error. |
+| `POST /api/documents/{id}/retry` | Explicitly retry a failed file; returns 202 with `{document, job}`. |
 | `GET /api/overview` | Run statistics, current queue/worker status, recent jobs, usage, and connector status. |
 | `GET /api/runs?page=1&limit=20` | Paginated outreach history; up to 100 records per page. |
 | `POST /api/runs` | Validate a goal and queue a new run. Returns 202. |
@@ -29,7 +33,7 @@ Use a stable `Idempotency-Key` header for each intended queued action. Repeating
 | `PUT /api/queue` | Set `{"paused":true}` or `false`; does not interrupt an active job. |
 | `PUT /api/profile` | Save sender `name`, optional `email`, and `context` for new Telegram/dashboard requests. |
 | `POST /api/replies/check` | Queue an on-demand check; returns 202 with a job ID and no outreach run ID. |
-| `GET /api/connectors` | Gmail account status, Telegram health, browser availability, model/search configuration presence, and sender profile. No tokens. |
+| `GET /api/connectors` | Gmail account status, Telegram health, browser availability, model/search configuration presence, local document/OCR availability, and sender profile. No tokens. |
 | `POST /api/connectors/gmail/connect` | Return the Google consent URL for the logged-in browser session. |
 | `GET /api/connectors/gmail/callback` | Google’s registered redirect; validates the one-use state and owner session, then returns to the dashboard. |
 | `POST /api/connectors/gmail/disconnect` | Remove encrypted local credentials and attempt revocation at Google. |
@@ -60,6 +64,31 @@ Example JSON for `POST /api/runs`:
 Gmail fills a missing sender address from the connected account. A supplied address must match it for draft/send actions. Known recipients can be supplied by prospect ID or matching target name, for example `{"Example AI":{"email":"person@example.com"}}`; these take precedence over discovered addresses. To work without Gmail, explicitly choose `gmail_action: "none"` and provide recipient addresses for contact checking. Draft is the UI default; the underlying reusable request record defaults to `none`.
 
 The trimmed goal must contain 1–2,000 characters. Booleans must be real JSON booleans, fields must be recognized, notes are bounded to 100,000 characters, and seed URLs to five. Invalid input returns 422. A configured browser is required for `use_browser`; a Brave key for `use_search`. Send requires `OUTREACH_ENABLE_SENDING=true` as well as an approved send-mode request.
+
+## Upload and attach files
+
+Send the file bytes as the request body of `POST /api/documents?filename=notes.pdf` with `Content-Type: application/octet-stream`. Use the same API-key or browser-session/CSRF authentication as other mutations. This route takes raw bytes, not a multipart form. It rejects empty/unsupported inputs and caps the stream at 10 MiB; larger uploads receive 413.
+
+The 202 response contains `document.id`, `document.status`, and the queued `job`. File status moves through `queued` → `processing` → `ready` or `failed`. Repeating identical bytes with the same extension reuses the original saved file and job. A renamed duplicate keeps its first filename. A failed read needs the explicit retry route with a fresh idempotency key.
+
+Poll `GET /api/documents/{id}`. Once ready, `content.pages` contains `number`, `text`, and `method` (`text` or `ocr`); `content.warnings` explains extraction limits. The metadata records the filename, checksum, size, and retrieval time. There is no unauthenticated or original-file download endpoint.
+
+Include references when creating a run:
+
+```json
+{
+  "goal": "Find research groups that match my uploaded resume.",
+  "attachments": [
+    {"document_id": "COPY_32_CHARACTER_ID_FROM_UPLOAD", "purpose": "background"}
+  ],
+  "use_search": true,
+  "use_browser": true,
+  "discover_emails": true,
+  "gmail_action": "draft"
+}
+```
+
+Use `purpose: "research"` for prospect evidence; `background` describes the sender. At most five unique file references are accepted. Unknown files receive 404; failed files must be retried or removed before starting. A queued extraction runs ahead of its outreach job on the shared worker. Uploading alone makes no model call. Run details include `attached_documents` metadata and `state.documents` with loaded, saved evidence. Research references look like `document:FILE_ID#page=2`. Addresses found in private files pause for owner selection.
 
 ## Review and resume
 

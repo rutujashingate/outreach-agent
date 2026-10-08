@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 from app.domain.schemas import EmailDraft, GoalText, NonEmptyText, OutreachRequest, Prospect
 from app.agent.state import OutreachState
 from app.domain.browser import PageEvidence
+from app.domain.documents import Attachment, DocumentEvidence, MAX_ATTACHMENTS
 
 # Reject whitespace, multiple recipients, and email-header injection. This is
 # syntax validation, not proof that an address exists or belongs to a person.
@@ -64,6 +65,7 @@ class Recipient(Record):
 
 
 class WorkflowRequest(OutreachRequest):
+    attachments: list[Attachment] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
     research_material: str = Field(default="", strict=True, max_length=100000)
     sender: Sender = Field(default_factory=Sender)
     recipients: dict[str, Recipient] = Field(default_factory=dict)
@@ -170,6 +172,9 @@ class WorkflowState(OutreachState):
     """Extend the existing request state with durable execution information."""
 
     run_id: NonEmptyText
+    attachments: list[Attachment] = Field(default_factory=list)
+    documents: list[DocumentEvidence] = Field(default_factory=list)
+    document_warnings: list[str] = Field(default_factory=list)
     structured_goal: OutreachGoal | None = None
     sender: Sender = Field(default_factory=Sender)
     research_material: str = ""

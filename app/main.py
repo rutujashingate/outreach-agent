@@ -50,7 +50,9 @@ def create_app(*, settings=None, manager=None, background=True):
             application.state.service = service = AgentService(ready)
             application.state.auth = OwnerAuth(service.store, configured.owner_password or ('demo' if configured.demo else ''))
             application.state.window = deque()
-            if manager is None: service.store.recover()
+            if manager is None:
+                service.store.recover()
+                service.documents.recover()
             http = await stack.enter_async_context(httpx.AsyncClient(timeout=30))
             client = FakeTelegram() if configured.demo else TelegramClient(http, configured.telegram_token)
             bot = TelegramBot(service, client); application.state.bot = bot

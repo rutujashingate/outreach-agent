@@ -32,6 +32,8 @@ class DemoModelClient(FakeModelClient):
     async def generate_structured(self, *, instructions, input_text, response_model):
         task = response_model.__name__
         if task == "OutreachGoal":
+            if input_text.startswith('{'):
+                input_text = json.loads(input_text)['goal']
             result = {"raw_goal": input_text, "goal_type": "academic", "objective": "Find a PhD supervisor",
                 "target_entity": "professor", "target_description": "Professors studying AI observability",
                 "desired_outcome": "Discuss PhD supervision", "constraints": [], "research_signals": ["AI observability"]}

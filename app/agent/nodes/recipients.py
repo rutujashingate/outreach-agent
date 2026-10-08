@@ -17,8 +17,22 @@ async def prepare_recipients(state, runtime):
             for email, quote in page.emails.items():
                 try: matches[email] = Recipient(email=email, source=page.url, evidence_quote=quote[:2000])
                 except ValueError: continue
+        # Private uploads supply evidence, not a public-contact assertion.
+        # Ask the owner to confirm addresses extracted from these files.
+        private_addresses = set()
+        from app.connectors.browser.client import extract_emails
+        for document in state.documents:
+            if document.purpose != 'research': continue
+            for page in document.pages:
+                if document.source(page.number) not in prospect.sources: continue
+                if not any(name and name.casefold() in page.text.casefold() for name in [prospect.company_name, prospect.decision_maker_name]): continue
+                for email, quote in extract_emails(page.text, []).items():
+                    if email in matches: continue
+                    try: matches[email] = Recipient(email=email, source=document.source(page.number), evidence_quote=quote[:2000])
+                    except ValueError: continue
+                    private_addresses.add(email)
         candidates[prospect.id] = list(matches.values())
-        if len(matches) == 1: recipients[prospect.id] = next(iter(matches.values()))
+        if len(matches) == 1 and not private_addresses: recipients[prospect.id] = next(iter(matches.values()))
         else: pending.append(prospect.id)
     return {'recipients': recipients, 'recipient_candidates': candidates, 'recipient_requests': pending,
             'current_step': 'awaiting_recipients' if pending else 'qualified'}

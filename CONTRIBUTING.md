@@ -49,6 +49,8 @@ git diff
 
 For browser-connector changes, install Chromium with `python -m playwright install chromium`, then run `RUN_BROWSER_TESTS=1 python -m pytest`. This includes a real-browser fixture without external network calls.
 
+For document-reader changes, install Tesseract using the [setup guide](docs/SETUP.md#read-files-and-use-them-for-research), then run `RUN_OCR_TESTS=1 python -m pytest`. This checks real image/scanned-PDF OCR using fictional local fixtures. The ordinary suite still tests document behavior without requiring system OCR.
+
 For evaluation changes, also run:
 
 ```bash

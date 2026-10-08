@@ -19,6 +19,7 @@ from app.agent.nodes.contact import contact_node
 from app.agent.nodes.discovery import discovery_node
 from app.agent.nodes.external import external_node, finish_node
 from app.agent.nodes.goal import goal_node
+from app.agent.nodes.documents import prepare_documents
 from app.agent.nodes.memory import memory_node
 from app.agent.nodes.qualification import qualification_node
 from app.agent.nodes.review import review_node
@@ -59,10 +60,12 @@ def observed(name, function):
 
 def build_research_graph():
     builder = StateGraph(WorkflowState, context_schema=WorkflowContext)
+    builder.add_node("prepare_documents", observed("prepare_documents", prepare_documents))
     builder.add_node("interpret_goal", observed("interpret_goal", goal_node))
     builder.add_node("research", observed("research", discovery_node))
     builder.add_node("qualification", observed("qualification", qualification_node))
-    builder.add_edge(START, "interpret_goal")
+    builder.add_edge(START, "prepare_documents")
+    builder.add_edge("prepare_documents", "interpret_goal")
     builder.add_edge("interpret_goal", "research")
     builder.add_edge("research", "qualification")
     builder.add_edge("qualification", END)

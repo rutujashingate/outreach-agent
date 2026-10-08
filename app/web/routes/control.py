@@ -43,6 +43,7 @@ def connections(request):
     gmail = manager.gmail.status() if manager.gmail and hasattr(manager.gmail, 'status') else {'connected': False}
     return {'gmail': gmail, 'telegram': service(request).store.get('telegram_status', {'health': 'disabled'}),
             'browser': {'available': manager.browser is not None}, 'search': {'configured': manager.search is not None},
+            'documents': service(request).documents.status(),
             'model': {'provider': settings.model_provider, 'configured': settings.demo or bool(os.getenv('GROQ_API_KEY' if settings.model_provider == 'groq' else 'OPENAI_API_KEY'))}, 'demo': settings.demo,
             'sender_profile': service(request).store.get('sender_profile', {'name': 'User', 'context': ''})}
 
@@ -152,3 +153,39 @@ async def demo_telegram(request: Request, body: DemoMessage):
     await bot.process_one()
     while await bot.deliver_one(): pass
     return {'messages': [payload for method, payload in bot.client.calls if method == 'sendMessage'][-30:]}
+
+
+@router.post('/documents', status_code=202)
+async def upload_document(request: Request, filename: str = Query(min_length=1, max_length=180)):
+    """Stream one raw file after owner authentication, with a hard size ceiling."""
+    import asyncio
+    from app.domain.documents import MAX_FILE_BYTES
+    data = bytearray()
+    try:
+        async with asyncio.timeout(30):
+            async for chunk in request.stream():
+                if len(data) + len(chunk) > MAX_FILE_BYTES:
+                    raise HTTPException(413, 'Files may be at most 10 MiB.')
+                data.extend(chunk)
+    except TimeoutError:
+        raise HTTPException(408, 'The upload took too long. Try again.') from None
+    return service(request).documents.save(filename, bytes(data))
+
+
+@router.get('/documents')
+async def documents(request: Request, page: int = Query(1, ge=1), ids: str = Query('', max_length=164)):
+    if ids:
+        values = ids.split(',')
+        if len(values) > 5: raise ValueError('At most five document IDs.')
+        return {'page': 1, 'items': [{k:v for k,v in service(request).documents.get(value).items() if k != 'content'} for value in values]}
+    return service(request).documents.list(page)
+
+
+@router.get('/documents/{document_id}')
+async def document_details(request: Request, document_id: str):
+    return service(request).documents.get(document_id)
+
+
+@router.post('/documents/{document_id}/retry', status_code=202)
+async def retry_document(request: Request, document_id: str, idempotency_key: Annotated[str | None, Header()] = None):
+    return service(request).documents.retry(document_id, request_key(idempotency_key))

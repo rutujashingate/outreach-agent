@@ -28,6 +28,7 @@ class Settings(BaseModel):
     google_client_secret: str = Field(default="", repr=False)
     app_url: str = "http://127.0.0.1:8000"
     browser_enabled: bool = True
+    ocr_languages: str = Field(default='eng', pattern=r'^[A-Za-z_]+(?:\+[A-Za-z_]+)*$')
     demo: bool = False
     limits: Limits = Field(default_factory=Limits)
 
@@ -51,5 +52,6 @@ class Settings(BaseModel):
             app_url=os.getenv("OUTREACH_APP_URL", "http://127.0.0.1:8000").rstrip("/"),
             browser_enabled=os.getenv("OUTREACH_BROWSER_ENABLED", "true").lower() == "true",
             demo=os.getenv("OUTREACH_DEMO", "false").lower() == "true",
+            ocr_languages=os.getenv('OUTREACH_OCR_LANGUAGES', 'eng'),
             limits=Limits.model_validate(json.loads(os.getenv("OUTREACH_LIMITS_JSON", "{}"))),
         )

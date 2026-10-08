@@ -122,13 +122,24 @@ class TelegramBot:
                         raise RunConflict('Request current recipient choices again.')
                     conversation['selections'][value['prospect_id']] = value['recipient']
                     self._next_recipient(conversation)
+                elif 'document_purpose' in value:
+                    if value.get('conversation') != conversation.get('id'):
+                        raise RunConflict('This run has already started or the conversation changed.')
+                    attachment = next((item for item in conversation.get('request', {}).get('attachments', [])
+                                       if item['document_id'] == value['document_id']), None)
+                    if attachment is None: raise RunConflict('This file is no longer attached.')
+                    attachment['purpose'] = value['document_purpose']
+                    self.say('File purpose changed to ' + attachment['purpose'] + '. Continue the current question.')
                 elif 'wizard' in value:
                     if value.get('conversation') != conversation.get('id'):
                         raise RunConflict('This conversation has changed. Use its latest buttons.')
                     self._wizard(conversation, value['wizard'])
             else:
-                text = item.get('message', {}).get('text', '').strip()
-                if not text:
+                message = item.get('message', {})
+                text = message.get('text', '').strip()
+                if message.get('document') or message.get('photo'):
+                    await self._attachment(message, conversation)
+                elif not text:
                     self.say('Please send text or use the buttons.')
                 elif text.startswith('/'):
                     self._command(text, conversation)
@@ -144,14 +155,51 @@ class TelegramBot:
         self.store.finish_update(item['update_id'], conversation)
         return True
 
+    async def _attachment(self, message, conversation):
+        from app.domain.documents import MAX_FILE_BYTES, MAX_ATTACHMENTS
+        if conversation.get('stage') in {'edit_subject', 'edit_body', 'recipient'}:
+            raise RunConflict('Finish this decision first. Files can be attached during a new goal.')
+        if not conversation.get('stage'):
+            conversation.update(stage='goal', id=secrets.token_hex(8), request={})
+        attachments = conversation['request'].setdefault('attachments', [])
+        if len(attachments) >= MAX_ATTACHMENTS: raise RunConflict('Attach at most five files per run. Use /clearfiles to replace them.')
+        item = message.get('document') or message['photo'][-1]
+        if item.get('file_size', 0) > MAX_FILE_BYTES: raise ToolError('Files may be at most 10 MiB.')
+        filename = item.get('file_name') or 'telegram-photo.jpg'
+        async with asyncio.timeout(35):
+            data = await self.client.download_file(item['file_id'], MAX_FILE_BYTES)
+        saved = self.service.documents.save(filename, data)
+        caption = message.get('caption', '').strip()
+        purpose = 'background' if caption.lower() == 'background' or conversation.get('stage') == 'background' else 'research'
+        reference = {'document_id': saved['document']['id'], 'purpose': purpose}
+        if not any(a['document_id'] == reference['document_id'] for a in attachments): attachments.append(reference)
+        choices = [(title, {'document_purpose': role, 'document_id': reference['document_id'], 'conversation': conversation['id']})
+                   for title, role in [('Use as research', 'research'), ('Use as my background', 'background')]]
+        self.say(f"Attached {saved['document']['filename']} as {purpose}. Reading is {saved['document']['status']}. Use /files for status.", choices)
+        if conversation['stage'] == 'goal':
+            if caption and caption.lower() not in {'background', 'research'}: self._text(caption, conversation)
+            else: self.say('What would you like to find using this file? Send your outreach goal.')
+        elif conversation['stage'] == 'background': self.say('Send - to continue, or add a short background description.')
+        else: self.say('Continue the current question. Choose Uploaded files for document-only research, or Search + browser to research the web using them.')
+
     def _command(self, text, conversation):
         command, _, arg = text.partition(' ')
         command = command.split('@')[0].lower()
         if command in {'/start', '/help'}:
-            self.say('Outreach agent\n/new — start a guided goal\n/runs — recent runs\n/review RUN_ID — review drafts\n/recipients RUN_ID — choose addresses\n/status RUN_ID — progress\n/retry RUN_ID — retry a failed run\n/cancel RUN_ID — stop a run\n/replies — check tracked replies\n/account — Gmail status\nUse the dashboard for logs and connector setup.')
+            self.say('Outreach agent\n/new — start a guided goal\n/runs — recent runs\n/review RUN_ID — review drafts\n/recipients RUN_ID — choose addresses\n/status RUN_ID — progress\n/retry RUN_ID — retry a failed run\n/cancel RUN_ID — stop a run\n/replies — check tracked replies\n/account — Gmail status\nSend documents or photos during /new. Caption them background to use as your profile. /files shows attached files; /retryfile FILE_ID retries a failed file; /clearfiles removes them from this conversation.\nUse the dashboard for logs and connector setup.')
         elif command == '/new':
             conversation.clear(); conversation.update(stage='goal', id=secrets.token_hex(8), request={})
             self.say('What is your outreach goal?')
+        elif command == '/files':
+            attachments = conversation.get('request', {}).get('attachments', [])
+            records = [self.service.documents.get(item['document_id']) for item in attachments]
+            self.say('\n'.join(f"{r['filename']}: {r['status']} ({r['id']})" + (f" — {r['error']}" if r['error'] else '') for r in records) or 'No files attached. Start /new and send a document or photo.')
+        elif command == '/retryfile':
+            result = self.service.documents.retry(arg.strip(), f'tg:{self.message_key}:document-retry')
+            self.say(f"File retry queued: {result['document']['filename']}. Use /files to check it.")
+        elif command == '/clearfiles':
+            conversation.get('request', {}).pop('attachments', None)
+            self.say('Files removed from this conversation. Saved runs and uploaded originals are unchanged.')
         elif command == '/runs':
             self.say('\n\n'.join(f'{r["run_id"]}\n{r["goal"]}\n{r["status"]} · {r["current_step"]}' for r in self.service.list_runs(limit=10)['items']) or 'No runs yet. Use /new.')
         elif command == '/review': self._review(arg.strip())
@@ -191,7 +239,7 @@ class TelegramBot:
             conversation['request']['sender'] = {**profile, 'email': status.get('email') or profile.get('email')}
             conversation['stage'] = 'source'
             self.say('Where should the research evidence come from?', self._wizard_buttons(conversation,
-                [('Search + browser', 'search'), ('Public URLs', 'urls'), ('My notes', 'notes')]))
+                [('Search + browser', 'search'), ('Public URLs', 'urls'), ('My notes', 'notes'), ('Uploaded files', 'files')]))
         elif stage == 'notes':
             conversation['request']['research_material'] = text; self._addresses_prompt(conversation)
         elif stage == 'urls':
@@ -232,8 +280,11 @@ class TelegramBot:
 
     def _wizard(self, conversation, value):
         stage = conversation.get('stage')
-        if stage == 'source' and value in {'search','urls','notes'}:
-            if value == 'search':
+        if stage == 'source' and value in {'search','urls','notes','files'}:
+            if value == 'files':
+                if not conversation['request'].get('attachments'): raise RunConflict('Upload a document or photo first, then choose Uploaded files.')
+                self._addresses_prompt(conversation)
+            elif value == 'search':
                 conversation['request'].update(use_search=True, use_browser=True); self._addresses_prompt(conversation)
             else: conversation['stage'] = value; self.say('Send up to five public URLs separated by spaces.' if value=='urls' else 'Paste your research notes with their source URLs.')
         elif stage == 'action' and value in {'none','draft','send'}:
@@ -242,7 +293,7 @@ class TelegramBot:
             request = WorkflowRequest.model_validate(conversation['request'])
             self.service.manager.validate_request(request)
             conversation['stage'] = 'confirm'
-            self.say(f'Goal: {request.goal}\nFrom: {request.sender.name} <{request.sender.email or "not configured"}>\nSearch: {request.use_search}\nBrowser: {request.use_browser}\nAfter approval: {request.gmail_action}\nStart this run?', self._wizard_buttons(conversation, [('Start run', 'confirm')]))
+            self.say(f'Goal: {request.goal}\nFrom: {request.sender.name} <{request.sender.email or "not configured"}>\nSearch: {request.use_search}\nBrowser: {request.use_browser}\nAttached files: {len(request.attachments)}\nAfter approval: {request.gmail_action}\nStart this run?', self._wizard_buttons(conversation, [('Start run', 'confirm')]))
         elif stage == 'confirm' and value == 'confirm':
             job = self.service.start(WorkflowRequest.model_validate(conversation['request']), f'tg:{self.message_key}:start', 'telegram')
             self.say(f'Run queued: {job["run_id"]}. I will notify you when it needs a decision.'); conversation.clear()

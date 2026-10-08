@@ -4,10 +4,10 @@ This guide explains the working application in plain language. The [setup guide]
 
 ## Follow one request
 
-1. You tell the Telegram bot your goal, background, research choices, and whether you want a Gmail draft or an approved send. You can also start from the dashboard.
+1. You tell the Telegram bot your goal, background, research choices, and whether you want a Gmail draft or an approved send. You can also start from the dashboard. Attach files as your background or research evidence; separate queued jobs extract their text locally before the run reads it.
 2. `AgentService.start()` validates these choices, saves a run and a job, and returns their identifiers immediately. A **run** holds the outreach results; a **job** is one queued piece of work on that run.
 3. One worker takes the job. `RunManager` opens the saved **LangGraph workflow**, an ordered set of steps with explicit choices about where to go next.
-4. The agent interprets the goal, researches public evidence, qualifies prospects, resolves addresses, checks relationship history and contact rules, then writes and reviews messages.
+4. The agent loads ready files, interprets the goal using relevant excerpts, researches uploaded/public evidence, qualifies prospects, resolves addresses, checks relationship history and contact rules, then writes and reviews messages.
 5. Missing or ambiguous addresses pause the run for your selection. Reviewed drafts pause for your decisions. The database saves both pauses so restarting does not lose them.
 6. You select approve, reject, or edit for **every** pending prospect, then submit the batch. Telegram and the dashboard share these choices. An edit goes through review and needs a fresh approval.
 7. The worker verifies the current account, recipient, exact message, version, requested action, and contact rules. It records the Gmail action before and after calling Gmail. An uncertain result stays blocked for inspection.
@@ -27,6 +27,7 @@ Phases 1–30 built and refined the original foundation, structured records, res
 | **34 — Browser research and recipient evidence** | Added `connectors/browser`, `domain/browser.py`, and `agent/nodes/recipients.py`; extended research and workflow records. | The agent can read public pages, retain evidence, collect explicitly published addresses, and ask about missing or ambiguous recipients. Tests check network restrictions, persistent page limits, source selection, and a real Chromium fixture with JavaScript and blocked requests. |
 | **35 — Dashboard and local service** | Added `web/routes/control.py`, `web/static`, migrations, startup/shutdown, authentication, and instance locking. Replaced temporary API routes with `/api` jobs and shared controls. | The dashboard can inspect and approve a Telegram run. Automated tests cover login, CSRF, statistics, migrations, restart recovery, and an action finishing during cancellation. A real browser walkthrough exercised login → research → approval → simulated Gmail draft. |
 | **36 — Packaging and handoff** | Updated README, this guide, setup/API instructions, `.env.example`, the diagram, and contributor instructions. Added Docker packaging and upstream browser sandbox notices. | A single service command starts local work. The [validation record](docs/VALIDATION.md) distinguishes completed checks from live account and container checks that still need the owner's environment. |
+| **37 — File reading and research** | Added document records, a local extraction connector, durable file jobs, Telegram/dashboard uploads, and a migration. Updated interpretation, research, recipient checks, and setup. The detailed file-by-file explanation is below. | PDFs, images/scans, office files, and text can guide searches and become cited evidence. Real OCR, upload/restart handling, background separation, and file-driven search checks pass. |
 
 ## Application entry and configuration
 
@@ -160,7 +161,7 @@ The normal local installation uses **SQLite only**, with two files: `relationshi
 
 ## Tests and evaluations
 
-The completed local suite passes **327 tests**, including the optional Chromium fixture. All four simulated evaluation scenarios pass. Packaging and restart checks are recorded in [validation](docs/VALIDATION.md).
+The completed local suite passes **358 tests**, including optional Chromium and real image/scanned-PDF OCR fixtures. All four simulated evaluation scenarios pass. Packaging and restart checks are recorded in [validation](docs/VALIDATION.md).
 
 **Tests** check behavior with known inputs. **Evaluations** score outreach results against small reference cases. A successful simulation confirms the workflow and scoring logic; it does not prove a real model’s research accuracy or writing quality.
 
@@ -187,3 +188,40 @@ The completed local suite passes **327 tests**, including the optional Chromium 
 | `evals/scoring.py` | `score_run(state, reference)` compares targets, sources, qualification, memory, hooks, writing constraints, reviews, and workflow approval rules. It returns numbers from 0 to 1. |
 
 Use `python -m pytest` for ordinary offline checks, `RUN_BROWSER_TESTS=1 python -m pytest` to include Chromium, and `python -m evals.run` for the four simulated evaluations. Real Telegram delivery, Google consent, and live Gmail writes are recorded separately in the validation guide.
+
+## Phase 37 — Read files and use them in research
+
+You can now attach files in a Telegram goal conversation or the dashboard's **New run** form. The shared worker extracts text locally, stores it, and passes cited evidence into the existing LangGraph workflow. A file marked **background** describes you; a file marked **research** describes the material you want the agent to investigate. The goal interpreter uses relevant topics and skills to guide the existing search. Drafting, human approval, contact rules, and sending controls still apply.
+
+**OCR** means optical character recognition: turning printed text in an image into editable text. This implementation uses Tesseract locally for images and PDF pages without selectable text. It does not perform general visual reasoning about photographs or charts. Extraction does not require another model key; starting an outreach run can send extracted text to your configured model and use its normal call budget.
+
+| New or changed file | Purpose, inputs, and outputs |
+|---|---|
+| `app/domain/documents.py` | Defines `Attachment` (a saved file ID and its purpose), `DocumentPage` (text, page number, reading method), and `DocumentEvidence` (filename, checksum, timestamp, pages, and warnings). `source(page)` returns a stable citation such as `document:...#page=2`. Shared constants bound file size, page count, and extracted text. |
+| `app/connectors/documents/extractor.py` | `extract(bytes, extension, languages)` returns checked pages and visible warnings. PDFium reads PDF text; Pillow decodes images; `recognize_image()` runs Tesseract. `office_text()` reads DOCX/ODT text without following external references. `VisibleHTML` omits script/style content. Unsupported, encrypted, malformed, binary, or oversized inputs fail clearly. |
+| `app/connectors/documents/worker.py` | Runs one extraction in a separate process. Takes a saved local path, format, and OCR languages; writes a bounded JSON result. CPU and Linux memory limits keep parsing separate from the application process. |
+| `app/storage/documents.py` | `DocumentRow` stores file metadata, extraction state, text, warnings, and errors. `document_record()` returns a saved record. Original bytes live under the data directory's `uploads/` folder. |
+| `migrations/versions/v002_documents.py` | Adds the uploads table while preserving existing runs, contacts, and connector credentials. Startup applies this after the earlier service migration. |
+| `app/services/documents.py` | `save()` checks and stores bytes, returning the file record and extraction job. Identical uploads reuse their content identity and extraction. `extract()` runs the isolated reader with a 90-second limit and an environment without provider credentials. `get()`/`list()` return owner-visible results. `recover()` marks interrupted work; `retry()` queues an explicit retry. |
+| `app/services/application.py` | Owns `DocumentService`, executes document jobs on the same single worker, validates attached file IDs, and includes file status in run details. Uploading a file does not start outreach or contact a model. |
+| `app/agent/nodes/documents.py` | `prepare_documents()` loads ready sources into the saved run before interpretation, and adds background text to the sender context. `evidence_records()` pairs each page's text with its filename, purpose, and citation. `bounded_evidence()` returns complete JSON excerpts with space for every source, including escaped text; it reports shortening. |
+| `app/agent/graph.py` | Adds the document-loading step before goal interpretation in the research subgraph. Saved checkpoints preserve loaded evidence. |
+| `app/agent/nodes/goal.py`, `components/goal_interpreter.py`, `prompts/goal.py` | Pass bounded file evidence into the existing interpretation call. The model can use relevant topics and skills as search signals while preserving your original goal. File text is treated as evidence, never as instructions to change approvals, tools, or contact rules. |
+| `app/agent/nodes/discovery.py` | Combines research-file text with supplied notes, keeping filename/page citations. Divides a bounded evidence allowance across pages so a single long file does not consume all available space. |
+| `app/agent/nodes/recipients.py` | Collects addresses present in cited research uploads. Addresses from private files require explicit owner selection; public-page discovery keeps its existing rules. |
+| `app/domain/workflow.py`, `storage/checkpoints.py` | Add attachment references and extracted documents to workflow state, with serialization support for saved/resumed runs. Old runs default to empty file collections. |
+| `app/connectors/telegram/client.py` | `download_file()` uses Telegram's file API with bounded downloads and sanitized errors; `FakeTelegram` supplies local file bytes for tests. |
+| `app/connectors/telegram/bot.py` | Accepts owner documents/photos during a new goal, saves purpose choices, and keeps conversation progress. `/files`, `/clearfiles`, and `/retryfile FILE_ID` inspect or manage the current attachments. Repeated updates reuse saved extraction. |
+| `app/web/routes/control.py` | Adds authenticated upload, status, inspection, and retry routes. Uploads stream with a 10 MiB ceiling and return HTTP 202. Connector status reports OCR availability. |
+| `app/web/static/index.html`, `app.js`, `app.css` | Add the upload area, per-file purpose choices, extraction status, text preview, remove/retry controls, source links, and file evidence in run details. External file content is rendered as text. |
+| `app/settings.py`, `.env.example` | Read `OUTREACH_OCR_LANGUAGES` (default `eng`) for installed OCR languages. |
+| `app/main.py` | Recovers interrupted document extraction during startup. |
+| `app/demo.py` | Keeps fictional goal interpretation compatible with document context. Demo document parsing/OCR is real and local; its model/search/Gmail remain simulated. |
+| `pyproject.toml`, `Dockerfile` | Add PDFium/Pillow dependencies and install English Tesseract in the container. Local OCR installation is described in setup. |
+| `tests/test_documents.py` | Checks real PDF text/page numbers, text/office/HTML formats, extraction limits, malformed files, optional real image/scanned-PDF OCR, upload authentication, saved-job recovery, duplicate uploads, document-driven search, recipient confirmation, and Telegram downloads. It also checks large Unicode pipe output, saved background evidence, complete source references under input limits, and parser cancellation without exposing provider keys. |
+| `tests/test_telegram.py` | Runs the complete guided conversation with either public-browser evidence or an uploaded file. File reading finishes before research, and the shared approval creates exactly one simulated Gmail draft without repeating model calls. |
+| `tests/test_server_recovery.py` | Updates migration checks to the new schema revision while still verifying old contact data survives. |
+
+The feature's completed checks and limits are recorded in [validation](docs/VALIDATION.md) and [setup](docs/SETUP.md). Current limits are five files per run, 10 MiB per file, 20 pages/frames per file, 16 megapixels per input image, and 40,000 extracted characters per file. Interpretation shares up to 20,000 text characters across files; research combines notes/file excerpts within 80,000 serialized characters before web evidence. Clipping and OCR methods are visible when you inspect the text. Files are saved across restarts; removing one from a new-run form does not delete saved originals or historical runs.
+
+`README.md`, `docs/SETUP.md`, `docs/API_GUIDE.md`, `docs/VALIDATION.md`, `plan.md`, and `CONTRIBUTING.md` were updated with file usage, the OCR installation step, authenticated upload requests, and reproducible checks. `docs/assets/workflow.mmd` and its SVG now show local file reading before goal interpretation.

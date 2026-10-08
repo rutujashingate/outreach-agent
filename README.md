@@ -9,6 +9,7 @@ A Telegram outreach assistant that turns your goal into sourced prospects and re
 
 ## What it does
 
+- Reads uploaded PDFs, scanned pages, images, Word/OpenDocument files, and text. Uses relevant content to guide research, with filename/page references.
 - Researches public websites and optional Brave results; retains sources and published email evidence.
 - Qualifies prospects, checks relationship history and contact rules, and writes personalized drafts.
 - Shares review, edit, approve, reject, retry, and cancel controls between Telegram and the dashboard.
@@ -32,6 +33,8 @@ python -m app.main --demo
 ```
 
 Open **http://127.0.0.1:8000** and sign in with **`demo`** (or your configured owner password). Select **New run**, keep the fictional example, then approve its draft and submit your decision. All external services are simulated; no keys or Chromium installation are needed. Demo progress is saved separately in `.data/demo`.
+
+Attach files in **New run** or send them during a Telegram goal conversation. Choose **My background** for a resume/profile or **Research evidence** for material to investigate. Image and scanned-PDF text needs [local Tesseract OCR](docs/SETUP.md#read-files-and-use-them-for-research); no extra model key is needed.
 
 For your own Telegram bot, Gmail account, and public browser research, follow the [setup guide](docs/SETUP.md). Start the configured application with **`python -m app.main`**. It loads `.env` automatically.
 

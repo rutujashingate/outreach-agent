@@ -32,6 +32,7 @@ If you do not have `.env` yet, copy `.env.example` to `.env`. If you already hav
 | `BRAVE_SEARCH_API_KEY` | Optional [Brave Search API](https://brave.com/search/api/) key. Finds relevant pages. Omit it when supplying URLs or notes yourself. |
 | `OUTREACH_GOOGLE_CLIENT_ID`, `OUTREACH_GOOGLE_CLIENT_SECRET` | Google OAuth web-client credentials for connecting your Gmail account. |
 | `OUTREACH_SECRET_KEY` | A local encryption key for saved Google credentials; generated below. It is not a Google API key. |
+| `OUTREACH_OCR_LANGUAGES=eng` | Installed Tesseract language codes for reading image text. English is the default; PDF/document text needs no OCR installation. |
 | `OUTREACH_READ_GMAIL=true` | Allows relevant conversation history to inform relationship checks. On-demand **Check replies** is a separate explicit action. |
 | `OUTREACH_ENABLE_SENDING=false` | Keeps sending disabled. Creating drafts still requires your approval. |
 | `OUTREACH_APP_URL` | The exact browser origin, initially `http://127.0.0.1:8000`. Use this same address for login and the Google callback. |
@@ -89,10 +90,53 @@ The conversation asks for your goal, background, research mode, known addresses,
 | `/review RUN_ID` | Current draft cards with approve/reject/edit choices. |
 | `/recipients RUN_ID` | Resolve missing or ambiguous recipient addresses. |
 | `/retry RUN_ID`, `/cancel RUN_ID` | Retry failed work or request a stop at the next safe boundary. |
+| `/files`, `/clearfiles` | Show current file IDs/status, or detach files from the goal conversation. |
+| `/retryfile FILE_ID` | Queue a failed/interrupted file for another local read. |
 | `/replies` | Queue a reply check for tracked Gmail conversations. |
 | `/account`, `/help` | Gmail connection status or command help. |
 
 Choose a decision for every pending prospect and submit the batch. Decisions made in the dashboard are immediately authoritative in Telegram too. Old buttons cannot approve a changed message. If Telegram delivery is uncertain, `/review` or `/status` retrieves current saved information.
+
+## Read files and use them for research
+
+You can supply your resume, a product brief, a research paper, prospect notes, or a screenshot of printed text. The worker reads the file locally, then the goal interpreter uses relevant details in the existing search/research workflow. For example: attach your resume as **background** and ask, “Find research groups that match my experience with API observability.” Enable web search to find new pages; choose uploaded-files research to work from the supplied evidence alone.
+
+**In Telegram:** start `/new`, send your goal, then attach documents or photos during the questions. A file sent while the bot asks for your background is marked background automatically. A caption of `background` also selects that role; the **Use as research / Use as my background** buttons let you correct it before starting. If you send a file before entering the goal, its caption can contain your goal. `/files` shows progress and file IDs. Continue with `-` after supplying background, then choose **Search + browser** or **Uploaded files**. Send a photo as a file when you want Telegram to preserve its original resolution.
+
+**In the dashboard:** open **New run**, choose a file purpose, and add files under **Files for this goal**. Each file has its own purpose selector, status, and **Inspect text** button. Wait for `ready` and inspect the extracted words before starting. Use **Retry file** for a failed read. A run started while extraction is queued waits behind that extraction job; if extraction fails, fix/retry the file and then retry the run.
+
+| Purpose | How the agent uses it |
+|---|---|
+| **My background** | Your experience or offering: used to interpret your goal and personalize messages. Kept out of the prospect research evidence. |
+| **Research evidence** | Facts and sources about potential targets: used with notes, search results, and public pages to find relevant prospects. |
+
+Supported formats:
+
+- **PDF:** reads selectable text. Pages without selectable text are rendered and read with OCR.
+- **Images:** PNG, JPEG, WebP, TIFF, and BMP; OCR reads printed text.
+- **Documents:** DOCX and ODT main text. Embedded pictures, comments, headers/footers, and exact page layout are not extracted.
+- **Text:** TXT, Markdown, CSV, JSON, YAML, XML, LOG, RST, TEX, and HTML/HTM; UTF-8 or UTF-16. HTML scripts and styles are omitted. CSV/JSON/XML are read as text, not executed or interpreted as instructions.
+
+**OCR** means optical character recognition: converting image text into words. Install Tesseract for images and scanned PDFs:
+
+```bash
+# macOS
+brew install tesseract
+
+# Debian/Ubuntu
+sudo apt-get update
+sudo apt-get install tesseract-ocr tesseract-ocr-eng
+```
+
+The Docker image includes English OCR. For other languages, install the corresponding Tesseract language data and set `OUTREACH_OCR_LANGUAGES`, for example `eng+hin` when both are installed. `tesseract --list-langs` lists installed languages. Connections shows whether the OCR executable is available; extraction verifies that the chosen language data works. [Tesseract usage and language options](https://tesseract-ocr.github.io/tessdoc/Command-Line-Usage.html).
+
+There is no separate OCR API key or paid extraction call. Uploading only queues local reading. Starting a run sends relevant extracted text to your configured Groq/OpenAI model; selected topics can become Brave search queries when search is enabled. File text is evidence and cannot change approval or sending rules.
+
+Limits: **five files per run, 10 MiB per file, 20 PDF pages/image frames per file, 16 megapixels per input image, and 40,000 extracted characters per file**. A file reader runs for at most 90 seconds, with 20 seconds per OCR page. Interpretation uses excerpts of up to 20,000 text characters across files; background joins the 10,000-character sender context. Research combines bounded file excerpts and notes, leaving room for web evidence. Shortening produces visible notices. Text/office files use “page 1” as a source section; it is not a Word layout page number.
+
+OCR can misread names and addresses. Inspect extracted text; this reader does not interpret diagrams, photographs, or handwriting reliably. Password-protected PDFs, legacy `.doc`, spreadsheets, archives, and arbitrary binary files are unsupported. PDFs mixing selectable text and scanned areas use their text layer; export image-only pages separately if needed.
+
+Filename/page citations remain attached to research evidence. Email addresses found in an uploaded file always require your selection before outreach; supplied recipient addresses still take precedence. Files stay in the local data directory across restarts. **Remove** and `/clearfiles` detach references from the new goal; they do not delete originals or historical evidence.
 
 ## 4. Connect Gmail
 
@@ -127,7 +171,7 @@ OUTREACH_CHECKPOINT_POSTGRES_URL=
 
 Both databases use **SQLite**. `relationships.sqlite3` contains runs, jobs, contacts, events, decisions, and encrypted credentials. `checkpoints.sqlite3` contains LangGraph progress. PostgreSQL is an optional retained adapter, not required or used alongside these defaults. The packaged one-worker service is validated with SQLite.
 
-Migrations apply automatically on startup. Back up the data directory with the service stopped and retain the encryption key separately. Do not delete SQLite journal/WAL files from a running service. Use the same directory after restart; approvals and queued work remain available. Interrupted executions require **Retry**. An uncertain Gmail write remains blocked: inspect Gmail and the recorded outcome before attempting any manual recovery.
+Migrations apply automatically on startup. Uploaded originals live in `uploads/`, and extracted text/metadata live in the application database. Back up the entire data directory with the service stopped and retain the encryption key separately. Do not delete SQLite journal/WAL files from a running service. Use the same directory after restart; approvals and queued work remain available. Interrupted executions require **Retry**. An uncertain Gmail write remains blocked: inspect Gmail and the recorded outcome before attempting any manual recovery.
 
 **Pause queue** prevents new jobs from starting; it does not interrupt the active job. **Cancel run** stops further work at a safe boundary. If Gmail is already creating/sending a message, the application records that result before stopping.
 
@@ -145,11 +189,11 @@ A run needing more calls stops at the cap. Changing limits requires restarting. 
 
 ```bash
 python -m pytest
-RUN_BROWSER_TESTS=1 python -m pytest
+RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 python -m pytest
 python -m evals.run --output .data/evaluations.json
 ```
 
-The second command needs Chromium and includes a local browser fixture. Neither command requires real service credentials. Live model evaluations are an explicit separate choice: export your model environment settings and run `python -m evals.run --live`. That evaluation command does not load `.env` and consumes model credits.
+The second command needs Chromium and Tesseract; it includes real local browser, image OCR, and scanned-PDF checks. Both commands use fictional files and need no external-service credentials. Live model evaluations are an explicit separate choice: export your model environment settings and run `python -m evals.run --live`. That evaluation command does not load `.env` and consumes model credits.
 
 Use `/health` for basic service health and Connections for connector status. The current service intentionally has no public `/docs` or legacy `/outreach` route; the [API guide](API_GUIDE.md) documents its authenticated interface.
 

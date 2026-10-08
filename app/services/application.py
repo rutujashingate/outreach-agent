@@ -21,12 +21,19 @@ class AgentService:
     def __init__(self, manager):
         self.manager = manager
         self.store = ControlStore(manager.repository.engine)
+        from app.services.documents import DocumentService
+        self.documents = DocumentService(manager.repository.engine, manager.settings)
         self.stopping = asyncio.Event()
         self.worker_busy = False
 
     def start(self, request: WorkflowRequest, key: str, origin="dashboard"):
         existing = self.store.find_job(key)
         if existing: return existing
+        ids = [item.document_id for item in request.attachments]
+        if len(ids) != len(set(ids)): raise ValueError('Attach each file only once.')
+        for document_id in ids:
+            record = self.documents.get(document_id)
+            if record['status'] == 'failed': raise RunConflict('An attached file could not be read. Retry it or remove it before starting.')
         gmail = self.manager.gmail
         account = gmail.status() if gmail and hasattr(gmail, "status") else {}
         if account.get("connected") and request.sender.email is None:
@@ -167,6 +174,9 @@ class AgentService:
             elif kind == "decisions": result = await self.manager.resume(run_id, ApprovalSubmission.model_validate(job["payload"]))
             elif kind == "recipients": result = await self.manager.select_recipients(run_id, job["payload"])
             elif kind == "retry": result = await self.manager.retry(run_id)
+            elif kind == 'document':
+                document = await self.documents.extract(job['payload']['document_id'])
+                result = None
             elif kind == "replies":
                 count = await self.check_replies()
                 self.store.put("reply_check", {"processed": count, "checked_at": now()})
@@ -174,7 +184,9 @@ class AgentService:
             else: raise ValueError("Unknown job type.")
             status = "cancelled" if result and result.state.current_step == "cancelled" else "completed"
             self.store.finish_job(job["id"], status)
-            message = (f"Run {run_id}: {result.state.current_step}.\nUse /review {run_id} or open the dashboard."
+            if kind == 'document':
+                message = f"File ready: {document['filename']} ({len(document['content']['pages'])} pages/sections). Continue your goal or inspect it in the dashboard."
+            else: message = (f"Run {run_id}: {result.state.current_step}.\nUse /review {run_id} or open the dashboard."
                        if result else f"Reply check complete: {count} new messages processed.")
             self._notify(job["id"], message)
         except asyncio.CancelledError:
@@ -183,7 +195,7 @@ class AgentService:
         except Exception as error:
             # Log only the exception type. Provider errors can contain secrets.
             self.store.finish_job(job["id"], "failed", f"{type(error).__name__}: work could not complete. Inspect the run and connector status.")
-            self._notify(job["id"], f"Work {job['id']} failed ({type(error).__name__}). Run: {job['run_id'] or 'reply check'}. Inspect the dashboard.")
+            self._notify(job["id"], f"Work {job['id']} failed ({type(error).__name__}). Run: {job['run_id'] or job['kind']}. Inspect the dashboard.")
         finally:
             self.worker_busy = False
         return True
@@ -220,6 +232,7 @@ class AgentService:
         return {**response.model_dump(mode="json"), "status": record["status"], "metadata": self.store.metadata(run_id),
                 "current_step": self.current_step(run_id, response.state.current_step, record['status']),
                 "usage": {k: record[k] for k in ("model_calls", "search_calls", "estimated_cost")},
+                "attached_documents": [{k:v for k,v in self.documents.get(item.document_id).items() if k != 'content'} for item in response.state.attachments],
                 "choices": self.choices(run_id), "events": events, "event_total": total, "event_page": event_page}
 
     def overview(self):

@@ -20,11 +20,12 @@ config:
 ---
 flowchart TD
     accTitle: One outreach workflow shared by Telegram and the dashboard
-    accDescr: A goal enters through private Telegram or the owner dashboard. Both use a durable job queue and one worker running LangGraph. The workflow interprets the goal, researches evidence with Brave and a public browser, qualifies prospects, resolves recipient addresses, checks memory and contact policy, creates a strategy, writes and reviews email, pauses for human approval, and records an approved Gmail action. Edits return to review; blocked or rejected work ends with a saved outcome. SQLite holds progress, decisions, and events for both interfaces.
+    accDescr: A goal and optional files enter through private Telegram or the owner dashboard. Local extraction reads document text and OCR before file evidence guides interpretation and research. Both use a durable job queue and one worker running LangGraph. The workflow interprets the goal, researches evidence with Brave and a public browser, qualifies prospects, resolves recipient addresses, checks memory and contact policy, creates a strategy, writes and reviews email, pauses for human approval, and records an approved Gmail action. Edits return to review; blocked or rejected work ends with a saved outcome. SQLite holds progress, decisions, and events for both interfaces.
     telegram["Private Telegram<br/>Goals and decisions"] --> service["Shared run service<br/>Saved queue and one worker"]
     dashboard["Owner dashboard<br/>Connections and controls"] --> service
-    service --> goal["LANGGRAPH<br/>Interpret the goal"]
-    goal --> research["Research prospects + sources<br/>Notes · Brave search · public browser"]
+    service --> files["Optional uploaded files<br/>Read text / local OCR · save cited evidence"]
+    files --> goal["LANGGRAPH<br/>Interpret the goal"]
+    goal --> research["Research prospects + sources<br/>Files · notes · Brave · public browser"]
     research --> qualification{"Qualified prospects?"}
     qualification -->|Yes| recipients["Resolve recipient addresses<br/>Published evidence or owner selection"]
     qualification -->|No| outcome["Save outcomes + relationship history"]
@@ -39,7 +40,7 @@ flowchart TD
     approval -->|Reject| outcome
     approval -->|Approve exact message| action["Recheck account, policy + duplicates<br/>Gmail draft / enabled send / record only"]
     action --> outcome
-    store[("SQLite<br/>Jobs, checkpoints and choices<br/>Evidence, events and action ledger")]
+    store[("SQLite<br/>Jobs, checkpoints and choices<br/>File text, events and action ledger")]
     service -. Save and resume .-> store
     approval -. Saved pause .-> store
     outcome -. Persist .-> store

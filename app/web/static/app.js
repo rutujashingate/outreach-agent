@@ -42,6 +42,17 @@ const date = (text) =>
       })
     : "Unknown";
 function link(url, text) {
+  const fileSource = /^document:([a-f0-9]{32})#page=(\d+)$/.exec(url);
+  if (fileSource) {
+    const document = currentRun?.state.documents?.find(
+      (item) => item.document_id === fileSource[1],
+    );
+    return button(
+      text ||
+        `${document?.filename || "Uploaded file"} · page ${fileSource[2]}`,
+      () => previewDocument(fileSource[1]),
+    );
+  }
   try {
     const u = new URL(url);
     if (!["http:", "https:"].includes(u.protocol)) throw Error();
@@ -512,6 +523,14 @@ function renderConnections(c) {
       c.model.provider +
         " · configuration presence only; credentials are checked when used",
     ),
+    card(
+      "F",
+      "Document reader",
+      c.documents?.ocr_available ? "ready" : "text only",
+      c.documents?.ocr_available
+        ? `PDF and document text · image/scanned-page OCR (${c.documents.ocr_languages})`
+        : "PDF/document text is ready. Install Tesseract to read images and scans.",
+    ),
     profile,
   );
 }
@@ -571,6 +590,43 @@ function renderDetail(data) {
       ),
     ),
   ];
+  if (data.attached_documents?.length)
+    cards.push(
+      panel(
+        "Files used for this goal",
+        ...data.attached_documents.map((document) =>
+          node(
+            "div",
+            { class: "file-row" },
+            node(
+              "div",
+              {},
+              node("strong", {}, document.filename),
+              node(
+                "span",
+                { class: "tiny" },
+                `${state.attachments.find((a) => a.document_id === document.id)?.purpose} · ${document.status}`,
+              ),
+              document.error ? node("p", {}, document.error) : null,
+            ),
+            node(
+              "div",
+              { class: "actions" },
+              button("Inspect text", () => previewDocument(document.id)),
+              document.status === "failed"
+                ? button("Retry file", async () => {
+                    await post(`/api/documents/${document.id}/retry`);
+                    await refresh();
+                  })
+                : null,
+            ),
+          ),
+        ),
+        ...state.document_warnings.map((message) =>
+          node("p", { class: "muted" }, message),
+        ),
+      ),
+    );
   if (data.awaiting_recipients) cards.push(recipientForm(state));
   for (const item of state.approval_requests) {
     if (!data.awaiting_approval) break;
@@ -619,7 +675,11 @@ function renderDetail(data) {
           "ul",
           { class: "source-list" },
           ...item.research_summary.map((s) =>
-            node("li", {}, s.startsWith("http") ? link(s) : s),
+            node(
+              "li",
+              {},
+              s.startsWith("http") || s.startsWith("document:") ? link(s) : s,
+            ),
           ),
         ),
         node(
@@ -936,12 +996,151 @@ $("new-run").addEventListener("click", () =>
 );
 $("close-run").addEventListener("click", () => $("run-dialog").close());
 $("close-edit").addEventListener("click", () => $("edit-dialog").close());
+// The form holds saved file IDs and how this goal should use each file.
+let uploads = [],
+  uploadingFiles = false;
+function renderUploads() {
+  $("upload-list").replaceChildren(
+    ...uploads.map((item) => {
+      const select = node(
+        "select",
+        {
+          onchange: (event) => {
+            item.purpose = event.target.value;
+          },
+        },
+        node("option", { value: "research" }, "Research evidence"),
+        node("option", { value: "background" }, "My background"),
+      );
+      select.value = item.purpose;
+      return node(
+        "div",
+        { class: "file-row" },
+        node(
+          "div",
+          {},
+          node("strong", {}, item.document.filename),
+          node("span", { class: "tiny" }, item.document.status),
+          item.document.error ? node("p", {}, item.document.error) : null,
+          select,
+        ),
+        node(
+          "div",
+          { class: "actions" },
+          button("Inspect text", () => previewDocument(item.document.id)),
+          item.document.status === "failed"
+            ? button("Retry", async () => {
+                const result = await post(
+                  `/api/documents/${item.document.id}/retry`,
+                );
+                item.document = result.document;
+                renderUploads();
+              })
+            : null,
+          button("Remove", () => {
+            uploads = uploads.filter((u) => u !== item);
+            renderUploads();
+          }),
+        ),
+      );
+    }),
+  );
+}
+async function refreshUploads() {
+  if (!uploads.length || uploadingFiles) return;
+  const data = await api(
+    "/api/documents?ids=" + uploads.map((item) => item.document.id).join(","),
+  );
+  for (const item of uploads)
+    item.document =
+      data.items.find((d) => d.id === item.document.id) || item.document;
+  renderUploads();
+}
+async function previewDocument(id) {
+  const document = await api("/api/documents/" + id);
+  $("document-title").textContent = document.filename;
+  $("document-content").replaceChildren(
+    node("p", { class: "muted" }, document.status),
+    document.error ? node("p", {}, document.error) : "",
+    ...(document.content.warnings || []).map((w) =>
+      node("p", { class: "muted" }, w),
+    ),
+    ...(document.content.pages || []).map((page) =>
+      node(
+        "section",
+        {},
+        node(
+          "h3",
+          {},
+          `Page/section ${page.number} · ${page.method === "ocr" ? "OCR — verify names and addresses" : "Text extraction"}`,
+        ),
+        node("pre", { class: "draft" }, page.text),
+      ),
+    ),
+  );
+  $("document-dialog").showModal();
+}
+$("close-document").addEventListener("click", () =>
+  $("document-dialog").close(),
+);
+$("document-input").addEventListener("change", async (event) => {
+  try {
+    $("run-error").textContent = "";
+    const files = Array.from(event.target.files),
+      purpose = $("file-purpose").value;
+    event.target.value = "";
+    if (uploads.length + files.length > 5)
+      throw Error("Attach at most five files per run.");
+    if (files.some((file) => file.size > 10 * 1024 * 1024))
+      throw Error("Each file must be at most 10 MiB.");
+    if (uploadingFiles) return;
+    uploadingFiles = true;
+    $("run-form").querySelector("[type=submit]").disabled = true;
+    try {
+      for (const file of files) {
+        const result = await api(
+          "/api/documents?filename=" + encodeURIComponent(file.name),
+          {
+            method: "POST",
+            body: file,
+            headers: { "Content-Type": "application/octet-stream" },
+          },
+        );
+        if (!uploads.some((item) => item.document.id === result.document.id))
+          uploads.push({ document: result.document, purpose });
+        renderUploads();
+      }
+    } finally {
+      uploadingFiles = false;
+      $("run-form").querySelector("[type=submit]").disabled = false;
+    }
+  } catch (error) {
+    $("run-error").textContent = error.message;
+  }
+});
+setInterval(() => {
+  if (
+    csrf &&
+    $("run-dialog").open &&
+    !$("document-dialog").open &&
+    uploads.some((item) =>
+      ["queued", "processing"].includes(item.document.status),
+    )
+  )
+    perform(refreshUploads);
+}, 5000);
+
 // Keep the request key when a response is lost, so trying again finds the
 // same saved job. Editing the request creates a new intentional submission.
 let pendingRun = null;
 $("run-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (submittingRun) return;
+  if (submittingRun || uploadingFiles) return;
+  if (uploads.some((item) => item.document.status === "failed")) {
+    $("run-error").textContent =
+      "Retry or remove failed files before starting.";
+    return;
+  }
   submittingRun = true;
   const submit = event.target.querySelector("[type=submit]");
   submit.disabled = true;
@@ -959,6 +1158,10 @@ $("run-form").addEventListener("submit", async (event) => {
       recipients[target] = { email };
     }
     const body = JSON.stringify({
+      attachments: uploads.map((item) => ({
+        document_id: item.document.id,
+        purpose: item.purpose,
+      })),
       recipients,
       goal: f.goal.value,
       sender: {
@@ -981,6 +1184,8 @@ $("run-form").addEventListener("submit", async (event) => {
       headers: { "Idempotency-Key": pendingRun.key },
     });
     pendingRun = null;
+    uploads = [];
+    renderUploads();
     $("run-dialog").close();
     await openRun(job.run_id);
     notice("Run queued. You can follow its progress here or in Telegram.");

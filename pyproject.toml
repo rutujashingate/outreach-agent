@@ -27,6 +27,8 @@ dependencies = [
     "cryptography>=44,<50",  # Encrypt connector credentials at rest.
     "argon2-cffi>=23,<26",  # Hash the dashboard owner's password.
     "alembic>=1.14,<2",  # Apply versioned application database migrations.
+    "pypdfium2>=4.30,<6",  # Read PDF text and render scanned pages locally.
+    "Pillow>=11,<13",  # Decode and normalize images before local OCR.
     "python-dotenv>=1,<2",  # Load local settings at service startup.
 ]
 
