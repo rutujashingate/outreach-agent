@@ -18,6 +18,9 @@ class Limits(BaseModel):
     max_revisions: int = Field(default=1, ge=0, le=5)
     max_graph_steps: int = Field(default=100, ge=10, le=1000)
     max_model_calls: int = Field(default=40, ge=1, le=1000)
+    # Ordinary messages get a smaller budget than a complete outreach run.
+    max_chat_model_calls: int = Field(default=6, ge=1, le=12)
+    max_chat_tool_calls: int = Field(default=5, ge=0, le=10)
     max_output_tokens: int = Field(default=4000, ge=64, le=32000)
     model_timeout: float = Field(default=60, gt=0, le=600)
     search_timeout: float = Field(default=15, gt=0, le=120)

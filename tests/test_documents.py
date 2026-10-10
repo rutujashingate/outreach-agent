@@ -259,7 +259,7 @@ def test_telegram_attachments_survive_handler_restart_and_ignore_unauthorized_up
         fresh=TelegramBot(AgentService(setup.manager),client)
         assert not await fresh.process_one()
         conversation=service.store.get('telegram_conversation')
-        assert conversation['stage']=='background' and len(conversation['request']['attachments'])==1
+        assert conversation['stage']=='chat' and len(conversation['request']['attachments'])==1
         assert len([c for c in client.calls if c[0]=='download'])==1
         await service.execute_one()
         assert service.documents.get(conversation['request']['attachments'][0]['document_id'])['status']=='ready'

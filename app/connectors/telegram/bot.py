@@ -1,5 +1,6 @@
-"""A persisted guided conversation; the shared service owns all outreach work."""
+"""Normal conversation, optional guided outreach, and versioned review controls."""
 import asyncio
+from hashlib import sha256
 import secrets
 import time
 
@@ -11,6 +12,7 @@ from app.domain.workflow import ApprovalDecision, WorkflowRequest, Recipient
 from app.services.runs import ConfigurationError, RunConflict, RunNotFound
 from app.connectors.search import ToolError
 from app.storage.control import OutboxRow, now
+from app.connectors.telegram.messages import queue_message
 
 
 class TelegramBot:
@@ -21,30 +23,18 @@ class TelegramBot:
         self.stop = asyncio.Event()
         self.sequence, self.message_key = 0, ''
 
-    def buttons(self, entries):
-        row = []
-        for title, value in entries:
-            token = secrets.token_urlsafe(16)
-            self.store.put('button:' + token, {**value, 'owner': self.owner, 'expires': time.time() + 86400})
-            row.append({'text': title, 'callback_data': token})
-        return {'inline_keyboard': [row[i:i+2] for i in range(0, len(row), 2)]}
-
     def say(self, text, entries=None):
-        markup = self.buttons(entries) if entries else None
-        # Leave headroom for part numbering and Unicode surrogate pairs.
-        chunks, part = [], ''
-        for char in text:
-            if len((part + char).encode('utf-16-le')) // 2 > 3500:
-                chunks.append(part); part = ''
-            part += char
-        chunks.append(part)
         self.sequence += 1
-        group = f'{self.message_key}:{self.sequence}'
-        for index, chunk in enumerate(chunks):
-            payload = {'chat_id': self.owner, 'text': (f'[{index+1}/{len(chunks)}] ' if len(chunks)>1 else '') + chunk,
-                       '_group': group}
-            if index == len(chunks)-1 and markup: payload['reply_markup'] = markup
-            self.store.notify(f'{group}:{index:04}', payload)
+        queue_message(self.store, self.owner, f'{self.message_key}:{self.sequence}', text, entries)
+
+    def _chat_conversation(self, conversation):
+        """Keep current files while moving an old wizard into normal chat."""
+        if conversation.get('mode') != 'chat':
+            attachments = conversation.get('request', {}).get('attachments', [])
+            conversation.clear()
+            # Replaying an update after a crash must select the same history.
+            conversation.update(mode='chat', stage='chat', id=sha256(f'{self.owner}:{self.message_key}'.encode()).hexdigest()[:32],
+                                request={'attachments': attachments})
 
     def _action_prompt(self, conversation):
         conversation['stage'] = 'action'
@@ -101,7 +91,14 @@ class TelegramBot:
                 value = self.store.get('button:' + callback.get('data', ''))
                 if not value or value['owner'] != self.owner or value['expires'] < time.time():
                     raise RunConflict('This button expired. Request a new review.')
-                if 'decision' in value:
+                if 'chat_proposal' in value:
+                    if conversation.get('id') != value['conversation']:
+                        raise RunConflict('This proposal belongs to an earlier conversation. Ask for a new one.')
+                    job = self.service.conversations.start_proposal(value['chat_proposal'], value['conversation'])
+                    self.say(f"Outreach started: {job['run_id']}. You can keep talking while it runs. I will notify you when a decision is needed.")
+                elif 'review_run' in value:
+                    self._review(value['review_run'])
+                elif 'decision' in value:
                     decision = {k: value[k] for k in ('prospect_id', 'version', 'fingerprint')}
                     if value['decision'] == 'edit':
                         # Check freshness now and again when the edit is submitted.
@@ -159,8 +156,8 @@ class TelegramBot:
         from app.domain.documents import MAX_FILE_BYTES, MAX_ATTACHMENTS
         if conversation.get('stage') in {'edit_subject', 'edit_body', 'recipient'}:
             raise RunConflict('Finish this decision first. Files can be attached during a new goal.')
-        if not conversation.get('stage'):
-            conversation.update(stage='goal', id=secrets.token_hex(8), request={})
+        if conversation.get('mode') != 'guided':
+            self._chat_conversation(conversation)
         attachments = conversation['request'].setdefault('attachments', [])
         if len(attachments) >= MAX_ATTACHMENTS: raise RunConflict('Attach at most five files per run. Use /clearfiles to replace them.')
         item = message.get('document') or message['photo'][-1]
@@ -176,7 +173,12 @@ class TelegramBot:
         choices = [(title, {'document_purpose': role, 'document_id': reference['document_id'], 'conversation': conversation['id']})
                    for title, role in [('Use as research', 'research'), ('Use as my background', 'background')]]
         self.say(f"Attached {saved['document']['filename']} as {purpose}. Reading is {saved['document']['status']}. Use /files for status.", choices)
-        if conversation['stage'] == 'goal':
+        if conversation.get('mode') == 'chat':
+            if caption and caption.lower() not in {'background', 'research'}:
+                self._text(caption, conversation)
+            else:
+                self.say('What would you like to know about this file? You can ask for a summary, specific details, or research based on it.')
+        elif conversation['stage'] == 'goal':
             if caption and caption.lower() not in {'background', 'research'}: self._text(caption, conversation)
             else: self.say('What would you like to find using this file? Send your outreach goal.')
         elif conversation['stage'] == 'background': self.say('Send - to continue, or add a short background description.')
@@ -186,14 +188,24 @@ class TelegramBot:
         command, _, arg = text.partition(' ')
         command = command.split('@')[0].lower()
         if command in {'/start', '/help'}:
-            self.say('Outreach agent\n/new — start a guided goal\n/runs — recent runs\n/review RUN_ID — review drafts\n/recipients RUN_ID — choose addresses\n/status RUN_ID — progress\n/retry RUN_ID — retry a failed run\n/cancel RUN_ID — stop a run\n/replies — check tracked replies\n/account — Gmail status\nSend documents or photos during /new. Caption them background to use as your profile. /files shows attached files; /retryfile FILE_ID retries a failed file; /clearfiles removes them from this conversation.\nUse the dashboard for logs and connector setup.')
+            if command == '/start':
+                self._chat_conversation(conversation)
+                conversation['stage'] = 'chat'
+            self.say('Hi! Just send me a message. Ask a question, share a website, or upload a file and tell me what you need. I remember recent messages, so you can ask follow-up questions. No /new is needed.\n\nOptional controls:\n/new — clear the conversation and start fresh\n/chat — leave guided questions and talk normally\n/guided — step-by-step outreach setup\n/runs — recent outreach runs\n/review RUN_ID — review drafts\n/recipients RUN_ID — choose addresses\n/status RUN_ID — progress\n/retry RUN_ID — retry failed work\n/cancel RUN_ID — stop a run\n/replies — check tracked replies\n/account — Gmail status\n/files — attached files\n/clearfiles — detach files\n/retryfile FILE_ID — retry reading\n\nEmail actions still need your review and approval. Use the dashboard for connector setup and logs.')
         elif command == '/new':
-            conversation.clear(); conversation.update(stage='goal', id=secrets.token_hex(8), request={})
+            conversation.clear(); self._chat_conversation(conversation)
+            self.say('New conversation. What would you like to talk about or work on?')
+        elif command == '/chat':
+            self._chat_conversation(conversation)
+            conversation['stage'] = 'chat'
+            self.say('You can talk normally now. What would you like to do?')
+        elif command == '/guided':
+            conversation.clear(); conversation.update(mode='guided', stage='goal', id=secrets.token_hex(16), request={})
             self.say('What is your outreach goal?')
         elif command == '/files':
             attachments = conversation.get('request', {}).get('attachments', [])
             records = [self.service.documents.get(item['document_id']) for item in attachments]
-            self.say('\n'.join(f"{r['filename']}: {r['status']} ({r['id']})" + (f" — {r['error']}" if r['error'] else '') for r in records) or 'No files attached. Start /new and send a document or photo.')
+            self.say('\n'.join(f"{r['filename']}: {r['status']} ({r['id']})" + (f" — {r['error']}" if r['error'] else '') for r in records) or 'No files attached. Send a document or photo here.')
         elif command == '/retryfile':
             result = self.service.documents.retry(arg.strip(), f'tg:{self.message_key}:document-retry')
             self.say(f"File retry queued: {result['document']['filename']}. Use /files to check it.")
@@ -225,6 +237,13 @@ class TelegramBot:
 
     def _text(self, text, conversation):
         stage = conversation.get('stage')
+        if conversation.get('mode') != 'guided' and stage not in {'edit_subject', 'edit_body', 'recipient'}:
+            self._chat_conversation(conversation)
+            self.service.conversations.queue(text, conversation['id'], conversation.get('request', {}).get('attachments', []),
+                                             f'tg:{self.message_key}:chat')
+            if self.store.get('queue', {}).get('paused'):
+                self.say('Your message is saved. Resume the queue in the dashboard when you want me to work on it.')
+            return
         if not stage:
             conversation.update(stage='goal', id=secrets.token_hex(8), request={}); stage='goal'
         if stage == 'goal':

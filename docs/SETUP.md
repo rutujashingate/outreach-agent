@@ -55,7 +55,7 @@ python -m playwright install chromium
 
 On supported Linux hosts, `python -m playwright install --with-deps chromium` also installs system libraries. The browser runs with Chromium’s sandbox, fresh cookies, and a public-address proxy. Only HTTP/HTTPS HTML pages are read. No form submissions, downloads, or logged-in browser actions are provided. [Playwright installation documentation](https://playwright.dev/python/docs/browsers).
 
-**Website reading without Brave:** in Telegram choose **Public URLs**, then send a website address. In the dashboard supply starting URLs, enable **Read public pages**, and leave **Search the web** off. The browser reads those pages and can follow same-site links one level deep, within the five-page default limit. Brave is used to find starting websites from a search query. Reading uploaded files also works without Brave; URLs mentioned inside files are not automatically added as browser starting URLs.
+**Website reading without Brave:** tell Telegram “Read https://example.com and explain what it does,” substituting the website you want. The optional `/guided` flow also offers **Public URLs**. In the dashboard supply starting URLs, enable **Read public pages**, and leave **Search the web** off. The browser reads supplied/search URLs and can follow same-site links one level deep, within the five-page default limit. Brave finds starting websites from a search query. Reading uploaded files also works without Brave; URLs mentioned inside files are not automatically added as browser starting URLs.
 
 ## 3. Connect Telegram
 
@@ -79,15 +79,23 @@ for update in response.get('result', []):
 PY
 ```
 
-4. Put **your** number in `OUTREACH_TELEGRAM_OWNER_ID`. Start the service with `python -m app.main` and send `/new` to your bot.
+4. Put **your** number in `OUTREACH_TELEGRAM_OWNER_ID`. Start the service with `python -m app.main` and send “Hi” to your bot. Keep the process running while using Telegram. Normal mode connects your bot; `--demo` uses simulated services.
 
 This application uses long polling, so it needs no public Telegram webhook. If the bot already has a webhook, remove that old configuration first; the connector reports a configuration error instead of silently replacing it. Use one running service per bot and data directory.
 
-The conversation asks for your goal, background, research mode, known addresses, and action. `-` reuses the saved sender profile or indicates no supplied recipients where prompted. Start in **draft** mode. Use the dashboard’s Connections page to save your name and accurate background before live outreach.
+**Talk normally.** You do not need `/new` or a fixed sequence of answers. Try “What can you help me with?”, “Read this website and explain its product,” or upload a file with “Summarize the main findings.” Follow with questions such as “Explain the second point.” The bot keeps the last six completed exchanges in the same conversation across restarts, with bounded source excerpts. It asks for missing information when needed. Without a Brave key it can read supplied URLs/files, but cannot discover new websites through search.
+
+If you ask for an outreach campaign, it prepares a concrete request and shows **Start outreach**. Check the goal, background, sources, and intended Gmail action; press the button or describe a change. This starts the existing research/qualification/writing workflow. It does not approve an email: the exact-message approval remains a separate step. Asking for a file summary or research answer does not automatically start outreach.
+
+`/guided` retains the original goal → background → research options → addresses → action questions. In that optional flow, `-` reuses your saved background or indicates no known recipients. `/chat` leaves guided questions. Use the dashboard’s Connections page to save your name and accurate background before live outreach.
+
+Each ordinary message is a durable job, so commands remain responsive during model work. Queue pause also pauses chat processing. Interrupted turns require `/retry RUN_ID`; completed replies and their outgoing messages are reused on recovery. Chat uses at most six model attempts and five tool selections per message by default, also subject to the existing search/page/cost limits. `max_chat_model_calls` and `max_chat_tool_calls` can be overridden in `OUTREACH_LIMITS_JSON`. Estimates are reservations, not provider bills. The dashboard's job list and usage totals include chat; its outreach-run list counts outreach only.
 
 | Command | Result |
 |---|---|
-| `/new` | Guided new request. |
+| Plain text or a file caption | A normal conversation, question, research request, or outreach proposal. |
+| `/new` | Start a fresh conversation and detach current files; saved runs and old records remain. |
+| `/guided`, `/chat` | Enter optional step-by-step setup, or return to ordinary conversation. |
 | `/runs`, `/status RUN_ID` | Recent runs or current progress. |
 | `/review RUN_ID` | Current draft cards with approve/reject/edit choices. |
 | `/recipients RUN_ID` | Resolve missing or ambiguous recipient addresses. |
@@ -103,7 +111,7 @@ Choose a decision for every pending prospect and submit the batch. Decisions mad
 
 You can supply your resume, a product brief, a research paper, prospect notes, or a screenshot of printed text. The worker reads the file locally, then the goal interpreter uses relevant details in the existing search/research workflow. For example: attach your resume as **background** and ask, “Find research groups that match my experience with API observability.” Enable web search to find new pages; choose uploaded-files research to work from the supplied evidence alone.
 
-**In Telegram:** start `/new`, send your goal, then attach documents or photos during the questions. A file sent while the bot asks for your background is marked background automatically. A caption of `background` also selects that role; the **Use as research / Use as my background** buttons let you correct it before starting. If you send a file before entering the goal, its caption can contain your goal. `/files` shows progress and file IDs. Continue with `-` after supplying background, then choose **Search + browser** or **Uploaded files**. Send a photo as a file when you want Telegram to preserve its original resolution.
+**In Telegram:** send a document or photo directly, with a caption such as “Summarize this PDF” or “Extract the company names.” Reading is queued before answering the caption. You can also upload without a caption and then ask a question. `/files` shows progress and file IDs. A caption of `background` selects that purpose; **Use as research / Use as my background** buttons let you change it. In `/guided`, a file uploaded at the background question is marked background automatically. Send a photo as a file when you want Telegram to preserve its original resolution. Conversational reading includes the first 12,000 extracted characters per file read and reports shortening; the outreach workflow retains its separate excerpt limits described below.
 
 **In the dashboard:** open **New run**, choose a file purpose, and add files under **Files for this goal**. Each file has its own purpose selector, status, and **Inspect text** button. Wait for `ready` and inspect the extracted words before starting. Use **Retry file** for a failed read. A run started while extraction is queued waits behind that extraction job; if extraction fails, fix/retry the file and then retry the run.
 

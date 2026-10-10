@@ -19,11 +19,17 @@ config:
     wrappingWidth: 380
 ---
 flowchart TD
-    accTitle: One outreach workflow shared by Telegram and the dashboard
-    accDescr: A goal and optional files enter through private Telegram or the owner dashboard. Local extraction reads document text and OCR before file evidence guides interpretation and research. Both use a durable job queue and one worker running LangGraph. The workflow interprets the goal, researches evidence with Brave and a public browser, qualifies prospects, resolves recipient addresses, checks memory and contact policy, creates a strategy, writes and reviews email, pauses for human approval, and records an approved Gmail action. Edits return to review; blocked or rejected work ends with a saved outcome. SQLite holds progress, decisions, and events for both interfaces.
-    telegram["Private Telegram<br/>Goals and decisions"] --> service["Shared run service<br/>Saved queue and one worker"]
+    accTitle: Natural Telegram conversation and one shared outreach workflow
+    accDescr: Telegram messages enter a saved queue. A LangGraph conversation loop remembers recent exchanges, reads files or public websites, searches when configured, and answers. Outreach requests become a concrete proposal; after the owner starts it, the existing outreach graph researches, qualifies, checks contacts, writes, reviews, and pauses for exact-message approval. The dashboard and optional guided setup use the same outreach service. SQLite holds jobs, history, evidence, usage, checkpoints and approvals.
+    telegram["Private Telegram<br/>Normal messages, files and decisions"] --> service["Shared service<br/>Saved queue and one worker"]
     dashboard["Owner dashboard<br/>Connections and controls"] --> service
-    service --> files["Optional uploaded files<br/>Read text / local OCR · save cited evidence"]
+    service --> chat["LANGGRAPH CONVERSATION<br/>Understand message + recent history"]
+    chat -->|Read evidence| tools["Bounded read-only tools<br/>Files · browser · search · run status"]
+    tools --> chat
+    chat -->|Answer or clarify| answer["Reply in Telegram<br/>Continue the conversation"]
+    chat -->|Outreach requested| proposal["Show request + Start outreach button"]
+    proposal -->|Owner starts it| files["Optional uploaded files<br/>Read text / local OCR · save cited evidence"]
+    service -->|Dashboard or guided outreach| files
     files --> goal["LANGGRAPH<br/>Interpret the goal"]
     goal --> research["Research prospects + sources<br/>Files · notes · Brave · public browser"]
     research --> qualification{"Qualified prospects?"}
@@ -40,7 +46,7 @@ flowchart TD
     approval -->|Reject| outcome
     approval -->|Approve exact message| action["Recheck account, policy + duplicates<br/>Gmail draft / enabled send / record only"]
     action --> outcome
-    store[("SQLite<br/>Jobs, checkpoints and choices<br/>File text, events and action ledger")]
+    store[("SQLite<br/>Jobs, conversation, checkpoints and choices<br/>File text, events and action ledger")]
     service -. Save and resume .-> store
     approval -. Saved pause .-> store
     outcome -. Persist .-> store

@@ -1,5 +1,20 @@
 # Local validation
 
+## Natural Telegram conversation — October 10, 2026
+
+| Check | Result |
+|---|---|
+| Complete automated suite | **376 passed** with `RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/python -m pytest -o addopts='' -q`. Includes real local Chromium and OCR fixtures, with simulated external APIs. |
+| Ordinary messages and memory | A greeting queues a chat job, not outreach. Follow-up context survives reopening SQLite. Consecutive queued messages see preceding completed answers. `/new` resets context; `/guided` and `/chat` switch modes. |
+| Files and public research | A captioned text upload is extracted before answering. Responses retain file/page or public-web references. Unattached files, private/guessed URLs, and links beyond one level are blocked. Missing search is reported without inventing search results. |
+| Durability and usage | Duplicate updates and replay after enqueue reuse the job/conversation. Saved answers survive interrupted delivery without another model call. Explicit retry retains spent budgets. Queue pause, cancellation, model/tool bounds, and six-exchange history limits pass. |
+| Outreach boundary | A normal chat request produces a concrete proposal. Starting it enters the existing graph; repeated starts cannot duplicate the run. Follow-ups invalidate older proposals. A fake browser/model/Gmail flow still pauses for exact-message approval before one simulated Gmail draft. Unknown model actions cannot send mail. |
+| Background separation | A resume can be summarized in chat without its private background text being carried into prospect research evidence. Its background role remains attached to the outreach request. |
+| Service smoke check | An authenticated request to the demo Telegram endpoint queued a chat job, the real background worker produced a simulated Telegram reply, health stayed `ok`, and the outreach-run count stayed zero. The updated Mermaid diagram was rendered and visually inspected. |
+| Existing quality checks | All four simulated outreach evaluations pass. These score reference cases and workflow behavior, not live conversational intelligence. |
+
+No live Telegram/Groq/Gmail calls were made for this change. Credentials and local databases were preserved. The account-connected check is to restart normal mode, send “Hi,” ask about an uploaded file or supplied public URL, ask a follow-up, and then request outreach. Search discovery needs a Brave key; supplied URLs and files do not. Conversation is currently available in Telegram; the dashboard lists jobs/usage and controls outreach, rather than displaying a chat transcript.
+
 ## File reading — October 8, 2026
 
 | Check | Result |
@@ -39,7 +54,7 @@ Existing local `.env` credentials and database files were preserved. Manual serv
 
 ## Checks that still need the owner's environment
 
-- **Real Telegram delivery:** configure the bot token and owner ID, then complete the guided conversation in your private chat.
+- **Real Telegram delivery:** configure the bot token and owner ID, then test normal messages, a file/web question, a follow-up, and an outreach proposal. `/guided` remains available for the original step-by-step flow.
 - **Real Google connection and actions:** configure the Google web client and encryption key, complete consent, create an approved draft addressed to yourself, then explicitly enable and approve a separate test send to yourself. No real Gmail draft or email was created during this implementation.
 - **Live Groq quality:** provide your model key and review real sourced results. The simulated eval scores are not live model benchmarks.
 - **Docker build/run and Linux hosting:** Docker is not installed on the development machine. Dockerfile/Compose packaging is provided, but a container build and host-specific Chromium sandbox operation have not been verified. Remote hosting has not been performed.

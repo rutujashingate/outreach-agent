@@ -34,7 +34,7 @@ def test_new_bot_instance_continues_saved_conversation(make_run_manager):
     service=AgentService(setup.manager)
     async def exercise():
         first=TelegramBot(service,FakeTelegram())
-        service.store.accept_updates([incoming(1,'/new'),incoming(2,'Find AI startups')],123)
+        service.store.accept_updates([incoming(1,'/guided'),incoming(2,'Find AI startups')],123)
         assert await first.process_one() and await first.process_one()
         second=TelegramBot(AgentService(setup.manager),FakeTelegram())
         service.store.accept_updates([incoming(2,'Find AI startups'),incoming(3,'I build observability tools.')],123)
@@ -68,7 +68,7 @@ def test_guided_telegram_browser_gmail_flow_and_dashboard_shared_choices(tmp_pat
                     if entry['text']==title: return entry['callback_data']
         raise AssertionError(f'Missing button {title}')
     async def check():
-        await dispatch('/new');await dispatch('Find professors studying AI observability');await dispatch('I am exploring PhD supervision.')
+        await dispatch('/guided');await dispatch('Find professors studying AI observability');await dispatch('I am exploring PhD supervision.')
         if source_mode == 'file':
             client.files['notes']=b'Example University. Ada Example studies AI observability. https://example.com/lab'
             await dispatch(file=True)

@@ -3,12 +3,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Contributions welcome](https://img.shields.io/badge/Contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-A Telegram outreach assistant that turns your goal into sourced prospects and reviewed email drafts. A dashboard shows progress, evidence, approvals, Gmail connections, and usage. You approve the exact message before Gmail creates a draft or sends it.
+A conversational Telegram assistant for questions, file reading, public-web research, and outreach. Talk normally and ask follow-up questions. When you request outreach, it prepares sourced prospects and reviewed emails. You approve the exact message before Gmail creates a draft or sends it.
 
 **Python 3.12+ · LangGraph · FastAPI · Groq/OpenAI · SQLite · Playwright · Telegram · Gmail**
 
 ## What it does
 
+- Answers normal Telegram messages, remembers recent conversation, and chooses read-only tools when needed. `/new` is an optional reset; `/guided` opens step-by-step outreach setup.
 - Reads uploaded PDFs, scanned pages, images, Word/OpenDocument files, and text. Uses relevant content to guide research, with filename/page references.
 - Researches public websites and optional Brave results; retains sources and published email evidence.
 - Qualifies prospects, checks relationship history and contact rules, and writes personalized drafts.
@@ -19,9 +20,9 @@ A Telegram outreach assistant that turns your goal into sourced prospects and re
 
 ## How it works
 
-![Telegram and dashboard share a saved queue, LangGraph research and message workflow, human approval, Gmail actions, and SQLite persistence](docs/assets/workflow.svg)
+![Telegram conversation reads evidence and answers, or starts the shared outreach workflow with human approval, Gmail actions, and SQLite persistence](docs/assets/workflow.svg)
 
-One worker executes the workflow. Approval resumes the same run. Uncertain Gmail writes remain blocked for inspection rather than being automatically repeated.
+One saved queue serves conversation and outreach. The conversation graph can answer directly, read evidence, or propose an outreach run. Approval resumes the same outreach run. Uncertain Gmail writes remain blocked for inspection.
 
 ## Try it locally
 
@@ -34,7 +35,7 @@ python -m app.main --demo
 
 Open **http://127.0.0.1:8000** and sign in with **`demo`** (or your configured owner password). Select **New run**, keep the fictional example, then approve its draft and submit your decision. All external services are simulated; no keys or Chromium installation are needed. Demo progress is saved separately in `.data/demo`.
 
-Attach files in **New run** or send them during a Telegram goal conversation. Choose **My background** for a resume/profile or **Research evidence** for material to investigate. Image and scanned-PDF text needs [local Tesseract OCR](docs/SETUP.md#read-files-and-use-them-for-research); no extra model key is needed.
+Send a file in Telegram with a caption such as “Summarize this,” or attach it in the dashboard's **New run** form. Choose **My background** for a resume/profile or **Research evidence** for material to investigate. Image and scanned-PDF text needs [local Tesseract OCR](docs/SETUP.md#read-files-and-use-them-for-research); no extra model key is needed.
 
 For your own Telegram bot, Gmail account, and public browser research, follow the [setup guide](docs/SETUP.md). Start the configured application with **`python -m app.main`**. It loads `.env` automatically.
 

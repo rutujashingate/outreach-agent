@@ -120,7 +120,7 @@ class ControlStore:
             row = session.scalar(select(JobRow).where(JobRow.request_key == request_key))
             return job_dict(row) if row else None
 
-    def enqueue(self, kind, run_id, payload, request_key, *, state=None, origin="dashboard"):
+    def enqueue(self, kind, run_id, payload, request_key, *, state=None, origin="dashboard", run_kind="outreach"):
         """Create a run and its first job in one transaction, or return a replay."""
         existing = self.find_job(request_key)
         if existing: return existing
@@ -128,7 +128,9 @@ class ControlStore:
             with Session(self.engine) as session, session.begin():
                 if state is not None:
                     session.add(RunRow(id=run_id, payload=state.model_dump(mode="json"), status="queued"))
-                    session.add(RunMeta(run_id=run_id, origin=origin))
+                    session.add(RunMeta(run_id=run_id, origin=origin, kind=run_kind))
+                    if run_kind == 'chat':
+                        session.merge(ValueRow(key='chat:latest:' + payload['session_id'], value={'run_id': run_id}))
                 elif run_id:
                     active = session.scalar(select(JobRow.id).where(JobRow.run_id == run_id, JobRow.status.in_(["queued", "running"])))
                     if active:

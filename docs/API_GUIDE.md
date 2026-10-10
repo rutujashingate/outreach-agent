@@ -140,6 +140,6 @@ An uncertain Gmail result is not automatically retryable. The action ledger and 
 
 ## Fake Telegram walkthrough
 
-In `--demo` mode only, authenticated `POST /api/demo/telegram` accepts `{"text":"/new"}` or `{"callback_data":"..."}`. It feeds a saved update through the real bot handler and returns recent simulated outbound messages. Continue with the requested text; use the returned inline keyboard’s `callback_data` for button presses. The normal background worker executes jobs. This endpoint returns 404 in a normal runtime.
+In `--demo` mode only, authenticated `POST /api/demo/telegram` accepts `{"text":"Hello"}`, `{"text":"/guided"}`, or `{"callback_data":"..."}`. Ordinary messages queue conversation jobs; the demo model returns a clearly labeled simulated reply. `/guided` opens the complete fictional outreach walkthrough. `/new` now resets the conversation. Use the returned inline keyboard’s `callback_data` for button presses. The normal background worker executes jobs. This endpoint returns 404 in a normal runtime.
 
-See `tests/test_telegram.py` for a complete repeatable example with fake Telegram, browser, model, and Gmail services, followed by approval through the shared dashboard service.
+See `tests/test_telegram.py` for guided outreach with fake Telegram/browser/model/Gmail services, and `tests/test_conversation.py` for normal messages, source reading, saved follow-ups, recovery, and the handoff to the same approval workflow. Chat jobs have kind `chat`; they contribute to usage and job statistics without inflating the outreach-run count. Run details, cancellation, and explicit retry also work for their run IDs. Their conversation history is currently presented in Telegram, not as a dashboard chat interface.

@@ -31,7 +31,9 @@ class DemoModelClient(FakeModelClient):
 
     async def generate_structured(self, *, instructions, input_text, response_model):
         task = response_model.__name__
-        if task == "OutreachGoal":
+        if task == 'ConversationAction':
+            result = {'action': 'reply', 'text': 'Hello! This is a simulated conversation. The real bot can answer questions and read files or public websites. Use /guided to try the complete fictional outreach example.'}
+        elif task == "OutreachGoal":
             if input_text.startswith('{'):
                 input_text = json.loads(input_text)['goal']
             result = {"raw_goal": input_text, "goal_type": "academic", "objective": "Find a PhD supervisor",

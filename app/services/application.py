@@ -23,6 +23,8 @@ class AgentService:
         self.store = ControlStore(manager.repository.engine)
         from app.services.documents import DocumentService
         self.documents = DocumentService(manager.repository.engine, manager.settings)
+        from app.services.conversation import ConversationService
+        self.conversations = ConversationService(self)
         self.stopping = asyncio.Event()
         self.worker_busy = False
 
@@ -99,6 +101,8 @@ class AgentService:
         if row is None: raise RunNotFound("Unknown run.")
         if row["status"] != "failed": raise RunConflict("Only failed or interrupted runs can be retried.")
         if self.store.cancellation_requested(run_id): raise RunConflict("Cancelled runs cannot be retried.")
+        if (self.store.metadata(run_id) or {}).get('kind') == 'chat':
+            return self.store.enqueue('chat', run_id, self.conversations.retry_payload(run_id), key)
         return self.store.enqueue("retry", run_id, {}, key)
 
     def cancel(self, run_id):
@@ -170,6 +174,10 @@ class AgentService:
         self.worker_busy = True
         try:
             run_id, kind = job["run_id"], job["kind"]
+            if kind == 'chat':
+                status = await self.conversations.execute(job)
+                self.store.finish_job(job['id'], status)
+                return True
             if kind == "start": result = await self.manager.execute_new(run_id)
             elif kind == "decisions": result = await self.manager.resume(run_id, ApprovalSubmission.model_validate(job["payload"]))
             elif kind == "recipients": result = await self.manager.select_recipients(run_id, job["payload"])
@@ -185,7 +193,7 @@ class AgentService:
             status = "cancelled" if result and result.state.current_step == "cancelled" else "completed"
             self.store.finish_job(job["id"], status)
             if kind == 'document':
-                message = f"File ready: {document['filename']} ({len(document['content']['pages'])} pages/sections). Continue your goal or inspect it in the dashboard."
+                message = f"File ready: {document['filename']} ({len(document['content']['pages'])} pages/sections). Ask me a question about it, or inspect the text in the dashboard."
             else: message = (f"Run {run_id}: {result.state.current_step}.\nUse /review {run_id} or open the dashboard."
                        if result else f"Reply check complete: {count} new messages processed.")
             self._notify(job["id"], message)
@@ -195,7 +203,10 @@ class AgentService:
         except Exception as error:
             # Log only the exception type. Provider errors can contain secrets.
             self.store.finish_job(job["id"], "failed", f"{type(error).__name__}: work could not complete. Inspect the run and connector status.")
-            self._notify(job["id"], f"Work {job['id']} failed ({type(error).__name__}). Run: {job['run_id'] or job['kind']}. Inspect the dashboard.")
+            if job['kind'] == 'chat':
+                self._notify(job['id'], f"I couldn't finish that message. Check the model connection and usage limits in the dashboard. You can retry with /retry {job['run_id']}.")
+            else:
+                self._notify(job["id"], f"Work {job['id']} failed ({type(error).__name__}). Run: {job['run_id'] or job['kind']}. Inspect the dashboard.")
         finally:
             self.worker_busy = False
         return True
