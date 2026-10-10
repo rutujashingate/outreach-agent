@@ -23,6 +23,38 @@ class ModelClientError(RuntimeError):
     """A model request could not produce a usable result."""
 
 
+class ModelProviderError(ModelClientError):
+    """A provider failure described by our own text, never its raw response.
+
+    Adapters select a known reason. These messages may be saved or shown to the
+    owner because neither credentials nor provider-generated text are included.
+    """
+
+    _messages = {
+        "invalid_key": "The API key was rejected. Check the provider key in .env and restart the application.",
+        "organization_model_blocked": "The configured model is blocked by your organization. Allow it in Settings > Organization > Limits, save, then retry.",
+        "project_model_blocked": "The configured model is blocked by your project. Allow it in Settings > Projects > Limits, save, then retry.",
+        "permission_denied": "Access to the configured model was denied. Check organization and project model permissions.",
+        "rate_limited": "The provider's request or token limit was reached. Wait for its limit to reset, then retry. This is separate from the app's reserved budget.",
+        "request_rejected": "The provider rejected the request format or parameters. Check the configured model's structured-output support and the application's request.",
+        "model_unavailable": "The configured model or endpoint is unavailable. Check the model setting and restart after correcting it.",
+        "service_unavailable": "The model service is temporarily unavailable. Try again later.",
+        "connection_failed": "The model service could not be reached. Check the connection and try again later.",
+        "request_failed": "The model request failed. Inspect the saved HTTP status and provider configuration.",
+    }
+
+    def __init__(self, *, provider: str, reason: str, status_code: int | None = None):
+        self.provider = provider if provider in {"Groq", "OpenAI"} else "Model provider"
+        self.reason = reason if reason in self._messages else "request_failed"
+        self.status_code = status_code if type(status_code) is int and 100 <= status_code <= 599 else None
+        self.retryable = self.reason in {"service_unavailable", "connection_failed"}
+        super().__init__(self.public_message)
+
+    @property
+    def public_message(self) -> str:
+        return f"{self.provider}: {self._messages[self.reason]}"
+
+
 class ModelResponseError(ModelClientError):
     """The output is missing, incomplete, or does not match the requested format."""
 

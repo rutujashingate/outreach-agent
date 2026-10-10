@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 
 from app.domain.workflow import ApprovalDecision, ApprovalSubmission, WorkflowRequest, WorkflowState
 from app.agent.nodes.approval import validate_decisions
+from app.llm.client import ModelProviderError
+from app.services.limits import LimitExceeded
 from app.services.runs import RunConflict, RunNotFound
 from app.storage.control import ControlStore, JobRow, RunMeta, now
 from app.storage.models import RunRow, TraceRow, ActionRow
@@ -201,12 +203,19 @@ class AgentService:
             self.store.finish_job(job["id"], "interrupted", "Service stopped; inspect and retry.")
             raise
         except Exception as error:
-            # Log only the exception type. Provider errors can contain secrets.
-            self.store.finish_job(job["id"], "failed", f"{type(error).__name__}: work could not complete. Inspect the run and connector status.")
-            if job['kind'] == 'chat':
-                self._notify(job['id'], f"I couldn't finish that message. Check the model connection and usage limits in the dashboard. You can retry with /retry {job['run_id']}.")
+            # Only our own fixed explanations are safe to display. Raw provider
+            # errors can contain private prompts, identifiers, or credentials.
+            if isinstance(error, ModelProviderError):
+                explanation = error.public_message
+            elif isinstance(error, LimitExceeded):
+                explanation = "This run reached an application usage limit. Inspect its call counts and reserved budget in the dashboard; this is not a provider bill."
             else:
-                self._notify(job["id"], f"Work {job['id']} failed ({type(error).__name__}). Run: {job['run_id'] or job['kind']}. Inspect the dashboard.")
+                explanation = "Work could not complete. Inspect the run and connector status in the dashboard."
+            self.store.finish_job(job["id"], "failed", f"{type(error).__name__}: {explanation}")
+            if job['kind'] == 'chat':
+                self._notify(job['id'], f"I couldn't finish that message. {explanation}\nAfter resolving it, retry with /retry {job['run_id']}.")
+            else:
+                self._notify(job["id"], f"Work {job['id']} failed ({type(error).__name__}). {explanation}\nRun: {job['run_id'] or job['kind']}.")
         finally:
             self.worker_busy = False
         return True

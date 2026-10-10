@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import time
 
 from app.storage.repository import Repository
-from app.llm.client import ModelClient, ModelClientError, ModelResponseError
+from app.llm.client import ModelClient, ModelClientError, ModelProviderError, ModelResponseError
 from app.domain.workflow import MemoryFact, SearchResult
 from app.storage.events import trace
 from app.services.limits import Limits
@@ -27,8 +27,8 @@ class ManagedModelClient:
         async with self.semaphore:
             if self.consecutive_failures >= 3:
                 raise ModelClientError("Model requests were stopped after repeated failures.")
-            # Only transport failures get one retry. Invalid output and refusals
-            # require an explicit response, not repeated blind requests.
+            # Transport/server failures get one retry. Configuration failures,
+            # rate limits, invalid output, and refusals need owner action or time.
             for attempt in range(2):
                 check_cancelled(self.repository, self.run_id)
                 self.repository.reserve_call(self.run_id, "model", self.limits)
@@ -46,9 +46,13 @@ class ManagedModelClient:
                     return result
                 except (ModelClientError, TimeoutError) as error:
                     self.consecutive_failures += 1
+                    details = ({"provider": error.provider, "reason": error.reason,
+                                "http_status": error.status_code, "message": error.public_message}
+                               if isinstance(error, ModelProviderError) else {})
                     trace(self.repository, self.run_id, "model_failure", task=response_model.__name__,
-                          error_type=type(error).__name__, seconds=time.monotonic() - started)
-                    if attempt or isinstance(error, (ModelResponseError, TimeoutError)):
+                          error_type=type(error).__name__, seconds=time.monotonic() - started, **details)
+                    if (attempt or isinstance(error, (ModelResponseError, TimeoutError))
+                            or isinstance(error, ModelProviderError) and not error.retryable):
                         if isinstance(error, TimeoutError):
                             raise ModelClientError("Model request exceeded its time limit.") from error
                         raise

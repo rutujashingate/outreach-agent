@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.llm.client import FakeModelClient, ModelClientError, ModelRefusalError, ModelResponseError, generate_structured
+from app.llm.client import FakeModelClient, ModelClientError, ModelProviderError, ModelRefusalError, ModelResponseError, generate_structured
 from app.llm.groq_client import DEFAULT_GROQ_MODEL, GroqModelClient
 from app.domain.schemas import Qualification
 from app.services.runs import real_model_client
@@ -80,8 +80,13 @@ def test_groq_refusals_are_detected_without_returning_private_provider_text(payl
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("status", [401, 429, 500, "timeout"])
-def test_groq_adapter_makes_one_attempt_and_hides_credentials(status):
+@pytest.mark.parametrize("status, reason, retryable", [
+    (400, "request_rejected", False), (401, "invalid_key", False),
+    (403, "permission_denied", False), (404, "model_unavailable", False),
+    (422, "request_rejected", False), (429, "rate_limited", False),
+    (500, "service_unavailable", True), ("timeout", "connection_failed", True),
+])
+def test_groq_adapter_makes_one_attempt_and_hides_credentials(status, reason, retryable):
     requests = []
     def handle(request):
         requests.append(request)
@@ -91,11 +96,34 @@ def test_groq_adapter_makes_one_attempt_and_hides_credentials(status):
     async def exercise():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
             client = GroqModelClient(model=DEFAULT_GROQ_MODEL, api_key="test-only-secret", http_client=http)
-            with pytest.raises(ModelClientError) as failure:
+            with pytest.raises(ModelProviderError) as failure:
                 await client.generate_structured(instructions="Assess", input_text="Evidence", response_model=Qualification)
-            assert str(failure.value) == "Groq model request failed."
+            assert failure.value.reason == reason
+            assert failure.value.retryable is retryable
+            assert failure.value.status_code == (None if status == "timeout" else status)
+            assert "Private" not in str(failure.value) and "test-only-secret" not in str(failure.value)
     asyncio.run(exercise())
     assert len(requests) == 1
+
+
+@pytest.mark.parametrize("body", ['not JSON', '[]', '{"error":null}',
+    '{"error":{"code":["private-secret"],"message":"private-secret"}}'])
+def test_groq_malformed_permission_error_still_has_a_safe_explanation(body):
+    async def exercise():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+                lambda request: httpx.Response(403, text=body))) as http:
+            client = GroqModelClient(model=DEFAULT_GROQ_MODEL, api_key="test-only", http_client=http)
+            with pytest.raises(ModelProviderError) as failure:
+                await client.generate_structured(instructions="Assess", input_text="Evidence", response_model=Qualification)
+            assert failure.value.reason == "permission_denied"
+            assert "private-secret" not in failure.value.public_message
+    asyncio.run(exercise())
+
+
+def test_unknown_provider_diagnostics_cannot_become_public_text():
+    failure = ModelProviderError(provider="private-secret", reason="private-secret", status_code="private-secret")
+    assert failure.provider == "Model provider" and failure.reason == "request_failed"
+    assert failure.status_code is None and "private-secret" not in failure.public_message
 
 
 def test_groq_configuration_requires_its_key_and_uses_the_default_model(monkeypatch):

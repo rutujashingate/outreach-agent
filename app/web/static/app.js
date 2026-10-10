@@ -307,7 +307,7 @@ function renderOverview(data) {
       ),
       panel(
         "Usage & activity",
-        metric("Model calls", s.model_calls),
+        metric("Model attempts", s.model_calls),
         metric(
           "Search calls / browser pages",
           `${s.search_calls} / ${s.browser_pages}`,
@@ -316,11 +316,11 @@ function renderOverview(data) {
           "Reported tokens",
           s.token_usage_available ? s.tokens.toLocaleString() : "Not reported",
         ),
-        metric("Estimated model cost", `$${s.estimated_cost.toFixed(2)}`),
+        metric("Reserved model budget", `$${s.estimated_cost.toFixed(2)}`),
         node(
           "p",
           { class: "muted" },
-          "Estimates use your configured per-call reservation. They are not your provider’s bill.",
+          "This budget estimate counts every model attempt, including failures. It is not money owed. Check your model provider’s billing page for actual charges.",
         ),
       ),
     ),
@@ -586,7 +586,7 @@ function renderDetail(data) {
       node(
         "p",
         { class: "muted" },
-        `${data.usage.model_calls} model calls · ${data.usage.search_calls} searches · ${data.metadata?.browser_calls || 0} browser pages · $${data.usage.estimated_cost.toFixed(2)} estimated`,
+        `${data.usage.model_calls} model attempts · ${data.usage.search_calls} searches · ${data.metadata?.browser_calls || 0} browser pages · $${data.usage.estimated_cost.toFixed(2)} budget reserved (estimate, not a bill)`,
       ),
     ),
   ];

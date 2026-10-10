@@ -53,7 +53,7 @@ A **node** is a small workflow step. It receives the current state and the run�
 |---|---|
 | `app/agent/graph.py` | `build_full_graph(checkpointer)` returns the main executable workflow. `build_research_graph()` groups interpretation, research, and qualification; `build_outreach_graph()` groups strategy, writing, and review. `observed()` wraps steps with cancellation checks, timings, events, and current-step reporting. |
 | `app/agent/state.py` | Defines `OutreachState`: the goal and separate collections for prospects, qualifications, strategies, drafts, reviews, and progress. The complete state extends it in `domain/workflow.py`. New runs never share mutable collections. |
-| `app/agent/context.py` | `WorkflowContext` passes services to nodes. `ManagedModelClient` and `ManagedSearchTool` reserve persistent budgets before calls, enforce timeouts, and record usage. This keeps controls outside model prompts. |
+| `app/agent/context.py` | `WorkflowContext` passes services to nodes. `ManagedModelClient` and `ManagedSearchTool` reserve persistent budgets before calls, enforce timeouts, and record usage. Model failures record safe HTTP status/reason details. Known key, permission, and rate-limit failures stop without an automatic second attempt. |
 | `app/agent/routing.py` | `after_qualification`, `after_contact_policy`, `after_review`, and approval routing functions return the next step’s name. They stop unsuitable outreach and bound revision loops. |
 | `app/agent/policy.py` | `check_contact()` takes a recipient and saved relationship facts and returns whether contact is allowed, with reasons. `message_fingerprint()` makes a hash identifying the sender, recipient, message, intended action, and Gmail account. A changed message or account no longer matches its old approval. |
 | `app/agent/replies.py` | `process_reply()` takes one known inbound message, prevents repeat processing, classifies it, extracts supported facts, and updates contact rules. `build_reply_graph()` organizes this small inbound workflow. An explicit opt-out is stored before optional model work. It never sends an automatic reply. |
@@ -100,8 +100,8 @@ The files `prompts/goal.py`, `researcher.py`, `qualification.py`, `strategy.py`,
 | `app/domain/schemas.py` | Pydantic records for a basic goal request, prospects, qualifications, strategies, drafts, and reviews. Pydantic checks types and required fields before the data moves on. |
 | `app/domain/workflow.py` | Adds `WorkflowRequest`, `WorkflowState`, sender/recipient records, approval requests/decisions, reply records, outcomes, and memory facts. A request includes research choices and Gmail action; a state adds results, account identity, versions, and progress. Goals remain trimmed and limited to 2,000 characters. |
 | `app/domain/browser.py` | `PageEvidence` stores a page URL, title, retrieval time, bounded text, links, explicitly found email addresses, and any read error. |
-| `app/llm/client.py` | Defines the common structured-model interface, validation/error helpers, OpenAI adapter, and `FakeModelClient`. `generate_structured()` returns a validated record rather than unchecked model text. |
-| `app/llm/groq_client.py` | Sends structured requests to Groq, checks returned JSON, and captures reported token usage. It implements the same interface as the other model adapters. |
+| `app/llm/client.py` | Defines the common structured-model interface, validation/error helpers, OpenAI adapter, and `FakeModelClient`. `generate_structured()` returns a validated record. `ModelProviderError` takes a provider, known reason, and optional HTTP status; its `public_message` returns an application-written explanation safe to show the owner. |
+| `app/llm/groq_client.py` | Sends structured requests to Groq, checks returned JSON, and captures reported token usage. `_request_failure()` translates an HTTP response into a safe failure reason, including organization/project model blocks. Raw provider messages and unknown error codes are not saved or displayed. |
 | `app/llm/router.py` | Retains optional measured model-routing helpers. The normal service uses the single configured provider; it does not automatically choose a cheaper model. |
 
 ## Connectors
@@ -164,7 +164,7 @@ The normal local installation uses **SQLite only**, with two files: `relationshi
 
 ## Tests and evaluations
 
-The completed local suite passes **376 tests**, including optional Chromium and real image/scanned-PDF OCR fixtures. All four simulated evaluation scenarios pass. Packaging and restart checks are recorded in [validation](docs/VALIDATION.md).
+The validation record lists completed automated suites, including optional Chromium and real image/scanned-PDF OCR fixtures. All four simulated evaluation scenarios pass. Packaging and restart checks are recorded in [validation](docs/VALIDATION.md).
 
 **Tests** check behavior with known inputs. **Evaluations** score outreach results against small reference cases. A successful simulation confirms the workflow and scoring logic; it does not prove a real model’s research accuracy or writing quality.
 
@@ -172,7 +172,7 @@ The completed local suite passes **376 tests**, including optional Chromium and 
 |---|---|
 | `tests/conftest.py` | Provides fresh fictional records and isolated databases/settings. Real local keys cannot accidentally turn tests into live calls. |
 | `tests/test_schemas.py`, `test_state.py` | Input types, goal trimming/length, strict records, JSON conversion, and independent run collections. |
-| `tests/test_client.py`, `test_groq_client.py` | Structured response validation, provider failures, token information, and Groq configuration. |
+| `tests/test_client.py`, `test_groq_client.py` | Structured response validation, safe provider failure explanations, malformed error bodies, token information, and Groq configuration. |
 | `tests/test_researcher.py` | Research limits, accepted evidence, grounded URLs, duplicate prospects, and malformed model output. |
 | `tests/test_full_workflow.py` | Goal-to-draft behavior, qualification, review loops, edit/reject/approve decisions, account/action fingerprints, and duplicate external-action protections. |
 | `tests/test_memory_policy.py` | Supported memory quotes, relevance/expiry, opt-outs, contact timing, and reply handling. |
@@ -267,3 +267,21 @@ For example, a PDF captioned “Summarize this” first enters the local file-re
 Messages, answers, and bounded source excerpts live in SQLite. Chat does not checkpoint each intermediate model decision: after interruption you explicitly retry the saved turn, keeping recorded budgets and cached page reads. An answer already saved before interruption is reused. `/new` starts a fresh context; it does not delete historical records or cancel saved outreach runs. Chat jobs and costs appear in dashboard job/usage statistics; a dashboard chat transcript interface has not been added.
 
 `README.md`, `docs/SETUP.md`, `docs/API_GUIDE.md`, `plan.md`, and the Mermaid/SVG diagram describe this working route. `docs/VALIDATION.md` records 376 passing tests including local Chromium/OCR, plus the four simulated outreach evaluations. Live Telegram delivery and Groq's conversational quality still require an account-connected test; no real messages or Gmail actions were sent during these checks.
+
+## Phase 40 — Explain failed model calls and reserved budget
+
+The old generic Telegram failure did not distinguish a blocked model from an invalid key or an exhausted budget. A bounded live diagnostic returned Groq's `403 model_permission_blocked_org`: the key was accepted, but the organization did not allow the configured model. Two earlier failed attempts had added `$0.10` to the app's fixed reservation counter; that counter was not an invoice.
+
+| Changed file | What it now explains or does |
+|---|---|
+| `app/llm/client.py` | `ModelProviderError` accepts a known provider/reason/status and returns safe, fixed explanation text. Unknown provider text cannot become a user-facing message. |
+| `app/llm/groq_client.py` | `_request_failure(response)` identifies key, permission, request, rate-limit, and server failures. Organization and project blocks have distinct explanations. |
+| `app/agent/context.py` | `generate_structured()` saves the safe reason and HTTP status with the failed attempt. It retries temporary connection/server failures once, and stops immediately for known configuration or rate-limit failures. |
+| `app/services/conversation.py` | `execute(job)` saves the safe provider explanation with a failed chat turn so the owner can inspect it later. It still keeps inputs and budgets for explicit retry. |
+| `app/services/application.py` | `execute_one()` puts that explanation in the failed job and Telegram notification. Application limits have their own explanation; arbitrary exception messages remain hidden. |
+| `app/web/static/app.js` | The overview and run details say **Reserved model budget** and **model attempts**. They explain that failed attempts count and that the displayed amount is not money owed. No provider billing data is inferred from this number. |
+| `tests/test_groq_client.py` | Checks safe explanations for HTTP failures, malformed error bodies, hidden credentials, and exactly one request per adapter call. |
+| `tests/test_conversation.py` | Runs simulated provider failures through the real chat worker. Verifies the saved reason reaches Telegram and dashboard data, blocked calls are not repeated, transient server failures get one retry, and reservations stay counted. |
+| `docs/SETUP.md`, `docs/VALIDATION.md` | Explain permission recovery, provider billing versus application reservations, and the checks actually completed. |
+
+**Checked:** 391 automated tests passed, including local Chromium/OCR, plus JavaScript syntax and Git whitespace checks. Tests use fake external services. The live diagnostic identified the permission block; successful live conversation remains unverified. Credentials, model selection, and saved data were preserved.

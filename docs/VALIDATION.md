@@ -1,5 +1,12 @@
 # Local validation
 
+## Model failure explanations — October 10, 2026
+
+- **391 tests passed**, including local Chromium/OCR, with `RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/python -m pytest -o addopts='' -q`.
+- Simulated invalid keys, organization/project model blocks, bad requests, rate limits, and temporary server failures through the Groq adapter and chat worker. Verified safe saved errors/Telegram notifications, bounded retries, unchanged budget accounting, and credential redaction.
+- Dashboard JavaScript syntax and Git whitespace checks passed. Budget labels now distinguish reservations from actual billing.
+- A separate live diagnostic accepted the configured Groq key and found the model in its catalog, but a generic greeting request returned `403 model_permission_blocked_org`. No successful live response was obtained. No Telegram or Gmail message was sent during diagnosis. Further calls with that key stopped at the owner's request.
+
 ## Natural Telegram conversation — October 10, 2026
 
 | Check | Result |

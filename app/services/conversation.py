@@ -19,6 +19,7 @@ from app.connectors.search import ToolError
 from app.connectors.telegram.messages import queue_message
 from app.domain.documents import Attachment
 from app.domain.workflow import Sender, WorkflowRequest, WorkflowState
+from app.llm.client import ModelProviderError
 from app.services.cancellation import RunCancelled, check_cancelled
 from app.services.limits import LimitExceeded
 from app.services.runs import ConfigurationError, RunConflict, RunNotFound
@@ -111,10 +112,12 @@ class ConversationService:
             state.current_step = 'cancelled'
             self.manager.repository.save_run(state, 'cancelled')
             return 'cancelled'
-        except BaseException:
+        except BaseException as error:
             # Cancellation and crashes keep budgets and inputs for explicit retry.
             state.current_step = 'failed'
-            self.manager.repository.save_run(state, 'failed', 'Conversation interrupted or unavailable. Retry this turn.')
+            message = (error.public_message if isinstance(error, ModelProviderError)
+                       else 'Conversation interrupted or unavailable. Retry this turn.')
+            self.manager.repository.save_run(state, 'failed', message)
             raise
         return 'completed'
 

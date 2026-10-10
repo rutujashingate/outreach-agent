@@ -10,9 +10,32 @@ from typing import Self
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from app.llm.client import ModelClientError, ModelRefusalError, ModelResponseError
+from app.llm.client import ModelProviderError, ModelRefusalError, ModelResponseError
 
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
+
+
+def _request_failure(response: httpx.Response) -> ModelProviderError:
+    """Translate status and known error codes into a safe, useful explanation."""
+    status = response.status_code
+    reason = {
+        400: "request_rejected", 401: "invalid_key", 403: "permission_denied",
+        404: "model_unavailable", 413: "request_rejected", 422: "request_rejected",
+        429: "rate_limited",
+    }.get(status, "service_unavailable" if 500 <= status <= 599 else "request_failed")
+    if status == 403:
+        try:
+            payload = response.json()
+            error = payload.get("error") if isinstance(payload, dict) else None
+            code = error.get("code") if isinstance(error, dict) else None
+            # Compare only known codes; never save error.message or unknown codes.
+            if code == "model_permission_blocked_org":
+                reason = "organization_model_blocked"
+            elif code == "model_permission_blocked_project":
+                reason = "project_model_blocked"
+        except ValueError:
+            pass
+    return ModelProviderError(provider="Groq", status_code=status, reason=reason)
 
 
 class GroqModelClient:
@@ -69,9 +92,10 @@ class GroqModelClient:
                 headers={"Authorization": f"Bearer {self._key}"}, json=body,
             )
             response.raise_for_status()
+        except httpx.HTTPStatusError as error:
+            raise _request_failure(error.response) from error
         except httpx.HTTPError as error:
-            # Credentials and provider response bodies stay out of user errors.
-            raise ModelClientError("Groq model request failed.") from error
+            raise ModelProviderError(provider="Groq", reason="connection_failed") from error
         try:
             payload = response.json()
             if not isinstance(payload, dict):

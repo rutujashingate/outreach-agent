@@ -39,6 +39,10 @@ If you do not have `.env` yet, copy `.env.example` to `.env`. If you already hav
 
 Do not put secrets in Telegram messages, goals, Git commits, or screenshots. A connection shown as “configured” only means settings are present; the provider verifies them when called.
 
+If Groq reports that the model is blocked by your organization, open [Settings → Organization → Limits](https://console.groq.com/settings/limits), allow the model named in `GROQ_MODEL`, and save. A project-level block is controlled under Settings → Projects → Limits. A new key in the same organization does not bypass those permissions. This error does not mean you have reached the application's budget or need to buy credits. See [Groq's model permissions](https://console.groq.com/docs/model-permissions).
+
+Model failures now include a safe explanation in Telegram and saved job details. Invalid keys, blocked models, and rate limits stop immediately; temporary server/connection failures receive at most one automatic retry. Correct the setting or wait for the provider's limit to reset before explicitly retrying. Restart the application after changing `.env`.
+
 Generate the encryption key once:
 
 ```bash
@@ -204,13 +208,15 @@ Migrations apply automatically on startup. Uploaded originals live in `uploads/`
 
 Defaults: five pages per run, 20 seconds per page, one linked-page level, 15,000 extracted characters per page, two searches, at most ten discovered/five qualified prospects, and one shared revision. Model calls and browser attempts stay counted across retries.
 
-The default model budget reserves `$0.05` per call up to `$2` per run; it is **an estimate, not actual pricing**. A smaller starting cap can be configured without changing code:
+The dashboard's **Reserved model budget** counts a configured `$0.05` for each attempted call, up to `$2` per run. Failed attempts count too: two rejected calls display `$0.10`, without establishing that you owe ten cents. This estimate is a local stop limit, not provider pricing, a payment, or a guaranteed spending cap on your provider account. Choosing a cheaper model does not change this fixed reservation automatically. A smaller starting cap can be configured without changing code:
 
 ```dotenv
 OUTREACH_LIMITS_JSON={"max_estimated_cost_per_run":0.50,"max_model_calls":10}
 ```
 
 A run needing more calls stops at the cap. Changing limits requires restarting. Search/browser usage counts are shown separately; their costs are not included in the model estimate. Reported token counts appear when the provider returns them.
+
+Actual billing is managed with the provider. Groq offers a Free tier; upgrading to its paid Developer tier requires adding a payment method. Paid charges depend on token usage. Check Usage and Settings → Billing in Groq Console, as explained in [Groq's billing guide](https://console.groq.com/docs/billing-faqs). The outreach application does not collect payments.
 
 ## 6. Validate locally
 

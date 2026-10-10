@@ -3,6 +3,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import json
 
+import httpx
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -14,6 +15,7 @@ from app.connectors.telegram.client import FakeTelegram
 from app.domain.browser import PageEvidence
 from app.domain.workflow import SearchResult
 from app.llm.client import FakeModelClient, ModelResponseError
+from app.llm.groq_client import DEFAULT_GROQ_MODEL, GroqModelClient
 from app.services.application import AgentService
 from app.services.limits import Limits
 from app.services.runs import RunConflict
@@ -324,6 +326,44 @@ def test_failed_turn_retry_preserves_budget_and_redacts_provider_error(make_run_
             messages = [row.payload['text'] for row in session.scalars(select(OutboxRow))]
         assert 'provider-private-secret' not in str(messages)
         assert len(service.store.get('chat:history:session')['turns']) == 1
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("status, code, reason, attempts", [
+    (403, "model_permission_blocked_org", "organization_model_blocked", 1),
+    (403, "model_permission_blocked_project", "project_model_blocked", 1),
+    (401, "invalid_api_key", "invalid_key", 1),
+    (429, "rate_limit_exceeded", "rate_limited", 1),
+    (400, "private-secret", "request_rejected", 1),
+    (500, "private-secret", "service_unavailable", 2),
+])
+def test_provider_failure_reaches_telegram_and_dashboard_without_blind_retry(
+        make_run_manager, status, code, reason, attempts):
+    requests = []
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(status, json={'error': {'code': code, 'message': 'private-secret'}})
+    async def check():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+            client = GroqModelClient(model=DEFAULT_GROQ_MODEL, api_key='private-secret', http_client=http)
+            setup = make_run_manager(client=client, settings=Settings(telegram_owner_id=123))
+            service = AgentService(setup.manager)
+            job = service.conversations.queue('Hello', 'session', [], 'one')
+            await service.execute_one()
+            record = setup.repository.run(job['run_id'])
+            assert record['status'] == 'failed' and record['model_calls'] == attempts
+            assert record['estimated_cost'] == pytest.approx(attempts * .05)
+            assert len(requests) == attempts
+            from app.storage.events import events
+            failures = [item for item in events(setup.repository, job['run_id']) if item['event'] == 'model_failure']
+            assert all(item['reason'] == reason and item['http_status'] == status for item in failures)
+            assert record['error'] == failures[0]['message']
+            assert record['error'] in service.store.jobs()[0]['error']
+            with Session(service.store.engine) as session:
+                messages = [row.payload['text'] for row in session.scalars(select(OutboxRow))]
+            assert len(messages) == 1 and record['error'] in messages[0]
+            assert '/retry ' + job['run_id'] in messages[0]
+            assert 'private-secret' not in json.dumps([record['error'], failures, messages, service.store.jobs()])
     asyncio.run(check())
 
 
