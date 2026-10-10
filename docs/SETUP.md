@@ -55,6 +55,8 @@ python -m playwright install chromium
 
 On supported Linux hosts, `python -m playwright install --with-deps chromium` also installs system libraries. The browser runs with Chromium’s sandbox, fresh cookies, and a public-address proxy. Only HTTP/HTTPS HTML pages are read. No form submissions, downloads, or logged-in browser actions are provided. [Playwright installation documentation](https://playwright.dev/python/docs/browsers).
 
+**Website reading without Brave:** in Telegram choose **Public URLs**, then send a website address. In the dashboard supply starting URLs, enable **Read public pages**, and leave **Search the web** off. The browser reads those pages and can follow same-site links one level deep, within the five-page default limit. Brave is used to find starting websites from a search query. Reading uploaded files also works without Brave; URLs mentioned inside files are not automatically added as browser starting URLs.
+
 ## 3. Connect Telegram
 
 1. Create a bot with **@BotFather** using `/newbot`, then save its token in `.env`. Follow [Telegram’s bot setup instructions](https://core.telegram.org/bots/tutorial#obtain-your-bot-token).
@@ -140,13 +142,30 @@ Filename/page citations remain attached to research evidence. Email addresses fo
 
 ## 4. Connect Gmail
 
-In your [Google Cloud project](https://console.cloud.google.com/), enable the Gmail API, configure the OAuth consent screen, and add your account as a test user if the app is in Testing. Create an OAuth client of type **Web application**. Register this exact authorized redirect URI:
+**OAuth** is Google's sign-in process for granting this application access to your Gmail account. The connector is implemented, but Gmail is only connected after the steps below finish and Connections shows your email address.
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/). Create or select a project, for example **Outreach Agent**. In **APIs & Services → Library**, find **Gmail API** and enable it. [Google's setup instructions](https://developers.google.com/workspace/gmail/api/quickstart/python#enable_the_api).
+2. Open **Google Auth platform → Branding**. If prompted, click **Get started** and enter the app name, support email, and contact email. For your personal Gmail account, choose **External** as the audience. Keep the app in Testing and add your Gmail address under **Audience → Test users**. [Consent setup](https://developers.google.com/workspace/guides/configure-oauth-consent).
+3. In **Data Access**, add `https://www.googleapis.com/auth/gmail.readonly` and `https://www.googleapis.com/auth/gmail.compose`. Save the scope selection. These are the two permissions requested by this project's connector.
+4. Open **Clients → Create client**, select **Web application**, and name it **Outreach Local**. In **Authorized redirect URIs**, enter the exact callback below. Leave JavaScript origins empty; the Python server handles the sign-in. Create the client and copy its client ID and client secret. [Google's web-client instructions](https://developers.google.com/identity/protocols/oauth2/web-server#creatingcred).
 
 ```text
 http://127.0.0.1:8000/api/connectors/gmail/callback
 ```
 
-Save its client ID and secret in `.env`, along with the encryption key. Start the application, sign in at the same `127.0.0.1` address, open **Connections**, and select **Connect Google**. Complete consent in the same browser. Google requires the redirect URI to match the registered value. [Google web-server OAuth setup](https://developers.google.com/identity/protocols/oauth2/web-server).
+5. Edit `.env` in the project folder, beside `README.md`. Set the following values. Use your Google client credentials, not your Gmail password. Keep the existing `OUTREACH_SECRET_KEY`; generate it using section 2 only if it is missing. Leave real credentials out of `.env.example`.
+
+```dotenv
+OUTREACH_GOOGLE_CLIENT_ID=your_client_id.apps.googleusercontent.com
+OUTREACH_GOOGLE_CLIENT_SECRET=your_client_secret
+OUTREACH_APP_URL=http://127.0.0.1:8000
+OUTREACH_READ_GMAIL=true
+OUTREACH_ENABLE_SENDING=false
+```
+
+6. Restart with `python -m app.main` from the project folder. Use the normal service command for your account connection; demo mode uses fake Gmail. Open **http://127.0.0.1:8000**, enter your `OUTREACH_OWNER_PASSWORD`, open **Connections**, and select **Connect Google**. Sign in to the account you added as a test user and grant the requested permissions. Connections should then show that Gmail address. Telegram's `/account` command shows the same account.
+
+For `redirect_uri_mismatch`, compare the full callback above with the registered URI: scheme, hostname, port, path, and trailing slash must match. A test-user access error usually means the selected Gmail account is missing from **Audience → Test users**, or the wrong Cloud project/client was configured. Both client values and the local encryption key must be present before **Connect Google** can work.
 
 The app requests `gmail.readonly` to read history and `gmail.compose` to manage drafts and send approved messages. Compose permission includes sending, but this application still enforces the server sending switch, requested action, and exact-message approval. [Gmail permission definitions](https://developers.google.com/workspace/gmail/api/auth/scopes).
 
