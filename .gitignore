@@ -1,5 +1,8 @@
 # The local Python environment contains installed packages, not project code.
 .venv/
+# Local agent instructions and the working plan stay on this computer.
+/AGENTS.md
+/plan.md
 # Local model credentials and settings stay outside version control.
 .env
 .env.*

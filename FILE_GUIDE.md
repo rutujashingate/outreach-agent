@@ -40,7 +40,8 @@ Phases 1–30 built and refined the original foundation, structured records, res
 | `app/demo.py` | `build_demo_manager()` supplies fake model, search, browser, and Gmail clients to the real workflow. `DemoModelClient` produces fictional records by the requested record type, including a clearly labeled simulated chat reply. `demo_request()` provides a sample request for tests. Start the demo with `python -m app.main --demo`. |
 | `pyproject.toml` | Lists Python requirements, dependencies, optional test/Postgres packages, the `outreach-server` command, packaged dashboard assets, migrations, and pytest settings. |
 | `.env.example` | Documents configuration names without real secrets. Copy missing settings into your local `.env`; keep existing credentials. Service startup loads it automatically. |
-| `.gitignore` | Keeps credentials, databases, environments, and build outputs out of Git. |
+| `.gitignore` | Keeps credentials, databases, environments, and build outputs out of Git. After phase 39, the root `AGENTS.md` and `plan.md` were also made local-only: their files remain on this computer, but Git no longer tracks future changes to them. |
+| `AGENTS.md` (local only) | Instructions for coding assistants working in this checkout, including documentation and verification expectations. It is ignored by Git and is not included in fresh clones. |
 
 Every `__init__.py` marks its directory as an importable Python package. These files do not start the service or call external providers.
 
@@ -158,7 +159,7 @@ The normal local installation uses **SQLite only**, with two files: `relationshi
 | `docs/API_GUIDE.md` | Current authenticated endpoints and request/response examples. |
 | `docs/VALIDATION.md` | Records what was actually tested and the remaining live-environment checks. |
 | `docs/assets/workflow.mmd`, `workflow.svg` | Editable Mermaid flowchart and its rendered image. Shows the actual shared request path and approval loop. |
-| `plan.md` | The implemented direction, defaults, acceptance criteria, and live validation boundary. |
+| `plan.md` (local only) | The working direction, defaults, and acceptance criteria for this checkout. It is ignored by Git; the shared README, setup guide, phase history, and validation record document the published project. |
 | `CONTRIBUTING.md`, `LICENSE` | Contributor workflow and MIT licensing terms. Contributors retain their copyright and license contributions under MIT. |
 
 ## Tests and evaluations
