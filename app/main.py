@@ -20,6 +20,7 @@ from app.services.application import AgentService
 from app.services.auth import OwnerAuth, require_owner
 from app.services.instance import instance_lock
 from app.services.runtime import open_runtime
+from app.services.background import observe_task
 from app.services.runs import ConfigurationError, RunConflict, RunNotFound
 from app.services.limits import LimitExceeded
 from app.connectors.search import ToolError
@@ -65,6 +66,9 @@ def create_app(*, settings=None, manager=None, background=True):
                               asyncio.create_task(bot.handle(), name='telegram-handler'),
                               asyncio.create_task(bot.show_progress(), name='telegram-progress')]
             application.state.tasks = tasks
+            for task in tasks:
+                service.background_health[task.get_name()] = {'status': 'starting'}
+                task.add_done_callback(lambda done: observe_task(done, service.background_health, service.stopping))
             try: yield
             finally:
                 service.stopping.set(); bot.stop.set()
@@ -101,8 +105,10 @@ def create_app(*, settings=None, manager=None, background=True):
     @application.get('/health')
     async def health():
         tasks = application.state.tasks
-        healthy = not any(task.done() for task in tasks)
-        return JSONResponse({'status': 'ok' if healthy else 'degraded'}, status_code=200 if healthy else 503)
+        states = application.state.service.background_health
+        components = {task.get_name(): 'stopped' if task.done() else states.get(task.get_name(), {}).get('status', 'running') for task in tasks}
+        healthy = all(status in {'running', 'starting'} for status in components.values())
+        return JSONResponse({'status': 'ok' if healthy else 'degraded', 'components': components}, status_code=200 if healthy else 503)
 
     @application.post('/auth/login')
     def login(body: Login, request: Request):

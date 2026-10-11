@@ -14,6 +14,7 @@ from app.agent.nodes.approval import validate_decisions
 from app.llm.client import ModelProviderError
 from app.services.limits import LimitExceeded
 from app.services.cancellation import RunStopped
+from app.services.background import run_loop
 from app.services.runs import RunConflict, RunNotFound
 from app.storage.control import ControlStore, JobRow, RunMeta, now
 from app.storage.models import RunRow, TraceRow, ActionRow
@@ -34,6 +35,7 @@ class AgentService:
         self.conversations = ConversationService(self)
         self.stopping = asyncio.Event()
         self.worker_busy = False
+        self.background_health = {}
         from app.services.progress import ProgressTracker
         self.progress = ProgressTracker()
 
@@ -277,10 +279,7 @@ class AgentService:
             self.store.notify(f"job:{job_id}", {"chat_id": owner, "text": message})
 
     async def worker(self):
-        while not self.stopping.is_set():
-            if not await self.execute_one():
-                try: await asyncio.wait_for(self.stopping.wait(), timeout=1)
-                except TimeoutError: pass
+        await run_loop('outreach-worker', self.stopping, self.execute_one, self.background_health)
 
     def list_runs(self, *, page=1, limit=20):
         if page < 1 or not 1 <= limit <= 100: raise ValueError("Invalid pagination.")

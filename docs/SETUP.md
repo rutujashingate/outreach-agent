@@ -259,7 +259,7 @@ python -m evals.run --output .data/evaluations.json
 
 The second command needs Chromium and Tesseract; it includes real local browser, image OCR, and scanned-PDF checks. Both commands use fictional files and need no external-service credentials. Live model evaluations are an explicit separate choice: export your model environment settings and run `python -m evals.run --live`. That evaluation command does not load `.env` and consumes model credits.
 
-Use `/health` for basic service health and Connections for connector status. The current service intentionally has no public `/docs` or legacy `/outreach` route; the [API guide](API_GUIDE.md) documents its authenticated interface.
+Open **http://127.0.0.1:8000/health** for service health and Connections for connector status. Health includes the worker, Telegram polling, message handling, and progress display. `running` means that loop is active; `retrying` means a temporary database problem is being retried with a short, increasing wait. A stopped loop makes health return `degraded` with HTTP 503 rather than appearing healthy. Logs record the component and error type without printing credentials or raw exceptions. Interrupted jobs still require an explicit retry, and an uncertain external write is never automatically repeated. The current service intentionally has no public `/docs` or legacy `/outreach` route; the [API guide](API_GUIDE.md) documents its authenticated interface.
 
 ### Check your connected application
 

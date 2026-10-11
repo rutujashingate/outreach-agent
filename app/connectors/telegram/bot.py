@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.connectors.telegram.client import RateLimited
 from app.domain.workflow import ApprovalDecision, WorkflowRequest, Recipient
 from app.services.runs import ConfigurationError, RunConflict, RunNotFound
+from app.services.background import TRANSIENT_DATABASE_ERRORS, run_loop, wait_or_stop
 from app.connectors.search import ToolError
 from app.storage.control import OutboxRow, now
 from app.connectors.telegram.messages import queue_message
@@ -22,6 +23,7 @@ class TelegramBot:
         self.owner = service.manager.settings.telegram_owner_id
         self.stop = asyncio.Event()
         self.sequence, self.message_key = 0, ''
+        self.pending_finish = None
         from app.connectors.telegram.progress import TelegramProgress
         self.progress = TelegramProgress(service.progress, client, self.owner)
 
@@ -83,6 +85,13 @@ class TelegramBot:
                  [('Skip prospect', {'recipient': None, 'run_id': state.run_id, 'prospect_id': pid})])
 
     async def process_one(self):
+        if self.pending_finish is not None:
+            # The command already completed, but saving its conversation may
+            # have failed. Retry that save, rather than running the command.
+            update_id, conversation = self.pending_finish
+            await asyncio.to_thread(self.store.finish_update, update_id, conversation)
+            self.pending_finish = None
+            return True
         item = await asyncio.to_thread(self.store.next_update)
         if item is None: return False
         self.sequence, self.message_key = 0, str(item['update_id'])
@@ -109,6 +118,10 @@ class TelegramBot:
                     await asyncio.to_thread(self._command, text, conversation)
                 else:
                     await asyncio.to_thread(self._text, text, conversation)
+        except TRANSIENT_DATABASE_ERRORS:
+            # Keep the update unfinished. Its saved request/message keys make
+            # a later attempt reuse work already accepted before the outage.
+            raise
         except (ValueError, RunConflict, RunNotFound, ConfigurationError, ToolError) as error:
             # Only local validation/tool messages reach the owner, never raw
             # provider HTTP exceptions, credentials, or full validation inputs.
@@ -116,7 +129,9 @@ class TelegramBot:
             await asyncio.to_thread(self.say, message[:1000])
         except Exception:
             await asyncio.to_thread(self.say, 'That request could not be processed. Check the dashboard and try again.')
-        await asyncio.to_thread(self.store.finish_update, item['update_id'], conversation)
+        self.pending_finish = item['update_id'], conversation
+        await asyncio.to_thread(self.store.finish_update, *self.pending_finish)
+        self.pending_finish = None
         return True
 
     def _callback(self, value, conversation):
@@ -394,16 +409,18 @@ class TelegramBot:
         return True
 
     async def poll(self):
-        try:
-            webhook = await self.client.call('getWebhookInfo')
-            if webhook.get('url'): raise ToolError('Remove the existing Telegram webhook before using long polling.')
-            identity = await self.client.call('getMe')
-            await asyncio.to_thread(self.store.put, 'telegram_status', {'health': 'connected', 'username': identity.get('username'), 'checked_at': now()})
-        except ToolError:
-            await asyncio.to_thread(self.store.put, 'telegram_status', {'health': 'configuration_error', 'checked_at': now()}); return
-        offset = (await asyncio.to_thread(self.store.get, 'telegram_offset', {})).get('next', 0)
-        while not self.stop.is_set():
+        identity, offset = None, None
+
+        async def receive():
+            nonlocal identity, offset
+            updates = []
             try:
+                if identity is None:
+                    webhook = await self.client.call('getWebhookInfo')
+                    if webhook.get('url'): raise ToolError('Remove the existing Telegram webhook before using long polling.')
+                    identity = await self.client.call('getMe')
+                if offset is None:
+                    offset = (await asyncio.to_thread(self.store.get, 'telegram_offset', {})).get('next', 0)
                 updates = await self.client.call('getUpdates', offset=offset,
                     timeout=25, allowed_updates=['message','callback_query'])
                 if updates:
@@ -411,20 +428,23 @@ class TelegramBot:
                     offset = max(item['update_id'] for item in updates) + 1
                 await asyncio.to_thread(self.store.put, 'telegram_status', {'health': 'connected', 'username': identity.get('username'), 'checked_at': now()})
             except ToolError as error:
-                await asyncio.to_thread(self.store.put, 'telegram_status', {'health': 'connection_error', 'checked_at': now()})
-                try: await asyncio.wait_for(self.stop.wait(), timeout=error.delay if isinstance(error, RateLimited) else 5)
-                except TimeoutError: pass
+                await asyncio.to_thread(self.store.put, 'telegram_status', {'health': 'connection_error' if identity else 'configuration_error', 'checked_at': now()})
+                await wait_or_stop(self.stop, error.delay if isinstance(error, RateLimited) else 5)
+            return bool(updates)
+
+        await run_loop('telegram-poller', self.stop, receive, self.service.background_health)
 
     async def handle(self):
-        while not self.stop.is_set():
+        async def handle_next():
             processed = await self.process_one()
             delivered = await self.deliver_one()
-            if not processed and not delivered:
-                try: await asyncio.wait_for(self.stop.wait(), timeout=1)
-                except TimeoutError: pass
+            return processed or delivered
+
+        await run_loop('telegram-handler', self.stop, handle_next, self.service.background_health)
 
     async def show_progress(self):
-        while not self.stop.is_set():
+        async def display():
             await self.progress.tick()
-            try: await asyncio.wait_for(self.stop.wait(), timeout=0.5)
-            except TimeoutError: pass
+            return False
+
+        await run_loop('telegram-progress', self.stop, display, self.service.background_health, idle_delay=0.5)

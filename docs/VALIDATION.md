@@ -1,5 +1,15 @@
 # Local validation
 
+## Telegram background recovery — October 11, 2026
+
+- The local process was alive, but `/health` returned HTTP 503 and `degraded`. Read-only Telegram checks confirmed the token was valid, no webhook was configured, and one update was waiting. No new chat job had been received. The old process also reported a closed database connection while shutting down; it had not recorded the original task exit, so that exception could not be identified retrospectively.
+- Added recovery at the background-loop boundary for temporary database connection failures and connection-pool timeouts. The wait starts at five seconds and increases to at most 30 seconds. Telegram startup/network failures can recover too. Unexpected task exits now record a component name and error class, without private exception text. Health exposes component statuses and reports a stopped or retrying component as degraded.
+- **511 tests passed** with `RUN_POSTGRES_TESTS=1 RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/pytest -o addopts='' -o faulthandler_timeout=30 -q --tb=short`. Seven new checks verify worker recovery, persisted-update deduplication after a lost database confirmation, conversation-save recovery without repeating a completed command, suppression of uncertain Telegram resends, temporary Telegram startup recovery, safe task-exit reporting, and shutdown during backoff. The suite includes real local PostgreSQL/pgvector, Chromium, and OCR; fake external services handle these recovery scenarios.
+- Paused the idle queue, stopped the old process, and restarted with the fix. Restored the prior queue setting. Health subsequently returned HTTP 200 with the worker, Telegram poller, handler, and progress display all `running`. Telegram and Gmail remained connected.
+- The service naturally processed the owner's already-waiting message: completed chats increased from three to four, all five saved inbox updates were processed, and all five durable final-message records were delivered. No additional test chat, Gmail draft, or email was initiated by diagnostics. Existing cloud data, credentials, and connected accounts were retained.
+
+The recovery loop claims queued work rather than replaying an interrupted job. Existing explicit-retry and uncertain-external-write safeguards remain in place. A different code error still stops its component and is reported; it is not silently retried forever.
+
 ## Telegram speed and task progress — October 10, 2026
 
 - Inspected the existing hosted records without exposing message contents: three recent chats took approximately **24, 30, and 42 seconds** from job creation to completion; their individual model steps took approximately **3, 3, and 5 seconds**. Code inspection found repeated synchronous cloud reads on the shared network loop, alongside unnecessary separate value/control queries.
