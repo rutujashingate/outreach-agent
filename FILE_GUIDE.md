@@ -1,32 +1,56 @@
 # File guide
 
-Use this page to find the code you need. Open a folder below for file-by-file explanations; the full build log lives in [implementation history](docs/IMPLEMENTATION_HISTORY.md).
+This guide explains the working application in plain language. The [setup guide](docs/SETUP.md) explains how to run it. The [API guide](docs/API_GUIDE.md) describes requests used by the dashboard. Earlier work is preserved in [phase history](docs/PHASE_HISTORY.md) and the [previous file guide](docs/FILE_GUIDE_HISTORY.md).
 
-## Start here
+Read the section you need:
 
-| File | Main job | Input → output |
+- [Follow one request](#follow-one-request): understand the flow from your message to a result.
+- [Application entry and configuration](#application-entry-and-configuration): find startup and settings files.
+- [Agent core](#agent-core): understand workflow steps, components, and prompts.
+- [Services and persistence](#services-and-persistence): find saved jobs, state, and controls.
+- [Phase history](#phase-history-what-changed-when): see what was built and checked at each phase.
+
+## Follow one request
+
+1. You talk normally to the Telegram bot. `ConversationService.queue()` saves your message, and a LangGraph conversation loop answers, reads files/public pages/Gmail drafts, searches, or prepares requested emails. The latest message takes priority over old conversation. It remembers the last six exchanges across restarts. `/new` optionally resets this context; `/guided` opens step-by-step questions. Web search uses DuckDuckGo without a key, or Brave when configured.
+2. If you explicitly request email drafts, preparation starts directly. The bot waits for a **Create draft** button only when you explicitly ask to approve the plan before work begins. `AgentService.start()` validates its choices, saves a run and a job, and returns their identifiers to the application. Telegram keeps these identifiers out of ordinary replies. A **run** holds results; a **job** is one queued piece of work. Uploaded-file jobs extract text locally before the run uses it. Ordinary conversation, research, and file questions do not create emails.
+3. One worker takes the job. `RunManager` opens the saved **LangGraph workflow**, an ordered set of steps with explicit choices about where to go next.
+4. An ordinary email to a known recipient goes straight to the supplied writing request, relationship checks, writing, and review. Finding new contacts follows the research path: load files, interpret the goal, research evidence, qualify prospects, resolve addresses, check history and contact rules, then write and review. A test email does not need prospect research or a sales-fit score.
+5. Missing or ambiguous addresses pause the run for your selection. Requested Gmail drafts continue after automated review. App-only drafts and older paused approvals retain the shared approve/reject/edit controls.
+6. The worker checks the connected account, recipient, exact message, contact policy, and action history. It saves each requested Gmail draft once and records the result. An uncertain write stays blocked for inspection.
+7. The bot tells you when drafts are saved. You can ask it to edit an existing draft: it reads Gmail, prepares and reviews the complete revision, and shows a preview. **Approve changes** updates that same draft; **Reject changes** leaves it alone. You can approve in Telegram or the dashboard. You still click **Send** yourself in Gmail; the agent cannot send emails.
+8. The dashboard displays the same saved run, sources, outcomes, events, and usage. No second research run is needed to switch interfaces.
+
+For example, “Find professors studying AI observability” starts research. “Prepare email drafts for these professors” starts drafting once the necessary details are available. The default limit is five qualified prospects per run, so ten emails need smaller batches or a deliberate limit change. The included demo uses a fictional university and simulated services.
+
+**State** means the information needed to continue work: your goal, evidence, drafts, current step, pending choices, and outcomes. It is saved in local SQLite by default or in one Supabase Postgres database when configured. Changing stores does not copy old records automatically; see [Supabase setup](docs/SUPABASE.md).
+
+**Saved knowledge** is different from execution state. It holds passages from documents and website pages so you can find relevant information in a later conversation. Local embeddings represent each passage's meaning as numbers; pgvector compares them inside PostgreSQL. The new **Saved knowledge** dashboard view shows matches and source dates. **Connections → Storage validation** checks that records, checkpoints, originals, and retrieval work. Phase 45 below explains the added files and functions.
+
+## Phase history: what changed when
+
+Phases 1–30 built and refined the original foundation, structured records, research, full outreach workflow, memory, providers, evaluations, CLI, and documentation. Their detailed records remain in [the archive](docs/PHASE_HISTORY.md). Old paths in that archive describe that earlier version.
+
+| Phase | What was built and which files changed | What became possible and how it was checked |
 |---|---|---|
-| [app/main.py](app/main.py) | Starts the service and background worker. | Configuration → running app. |
-| [app/services/conversation.py](app/services/conversation.py) | Saves a message and runs the conversation. | Your message → answer or requested work. |
-| [app/agent/conversation.py](app/agent/conversation.py) | Chooses, runs, and records conversation steps. | Message + evidence → tool result or reply. |
-| [app/agent/graph.py](app/agent/graph.py) | Connects the outreach steps with LangGraph. | Saved state → research, reviewed drafts, outcomes. |
-| [app/llm/xai_routing.py](app/llm/xai_routing.py) | Selects the model for each task. | Task type → 4.3, 4.20, or Multi-Agent. |
-| [app/llm/tools.py](app/llm/tools.py) | Defines allowed reading tools and validates requests. | Function request → checked action. |
-| [app/services/draft_edits.py](app/services/draft_edits.py) | Prepares and applies approved edits. | Existing draft + instructions + approval → same draft updated. |
-| [app/storage/control.py](app/storage/control.py) | Saves jobs, conversations, and decisions. | Service actions → durable records. |
+| **31 — Consolidate the core** | Moved orchestration into `app/agent`, shared records into `app/domain`, providers into `app/llm`, persistence into `app/storage`, and adapters into `app/connectors`. Removed the interactive CLI, research-only workflow, and obsolete entry points. | One outreach workflow remained. All 285 retained behavioral tests passed after the move. Tests for removed interfaces were retired. |
+| **32 — Saved jobs and Telegram** | Added `services/application.py`, `storage/control.py`, the Telegram connector, cooperative cancellation, and shared decision storage. Updated graph events and run execution. | Guided conversations, duplicate-update handling, shared approval batches, live step reporting, retries, and queue controls work without blocking message handling. Tests cover unauthorized chats, stale buttons, restarts, editing, and cancellation. |
+| **33 — Connected Gmail account** | Added `connectors/gmail/oauth.py` and owner authentication. Updated Gmail client, approval fingerprints, external actions, reply processing, and evaluation approval checks. | Google sign-in stores encrypted renewable credentials. Approved actions are tied to the connected account. Reply checks process up to five new messages and scan at most 20 tracked actions per request. Mocked OAuth/Gmail tests cover renewal, account changes, redaction, duplicates, and reply limits. |
+| **34 — Browser research and recipient evidence** | Added `connectors/browser`, `domain/browser.py`, and `agent/nodes/recipients.py`; extended research and workflow records. | The agent can read public pages, retain evidence, collect explicitly published addresses, and ask about missing or ambiguous recipients. Tests check network restrictions, persistent page limits, source selection, and a real Chromium fixture with JavaScript and blocked requests. |
+| **35 — Dashboard and local service** | Added `web/routes/control.py`, `web/static`, migrations, startup/shutdown, authentication, and instance locking. Replaced temporary API routes with `/api` jobs and shared controls. | The dashboard can inspect and approve a Telegram run. Automated tests cover login, CSRF, statistics, migrations, restart recovery, and an action finishing during cancellation. A real browser walkthrough exercised login → research → approval → simulated Gmail draft. |
+| **36 — Packaging and handoff** | Updated README, this guide, setup/API instructions, `.env.example`, the diagram, and contributor instructions. Added Docker packaging and upstream browser sandbox notices. | A single service command starts local work. The [validation record](docs/VALIDATION.md) distinguishes completed checks from live account and container checks that still need the owner's environment. |
+| **37 — File reading and research** | Added document records, a local extraction connector, durable file jobs, Telegram/dashboard uploads, and a migration. Updated interpretation, research, recipient checks, and setup. The detailed file-by-file explanation is below. | PDFs, images/scans, office files, and text can guide searches and become cited evidence. Real OCR, upload/restart handling, background separation, and file-driven search checks pass. |
+| **38 — Gmail setup and website reading clarification** | Expanded `docs/SETUP.md`, clarified the credential warning in `.env.example`, and updated this guide. Prepared the ignored local `.env` for Gmail. | Google setup now has explicit project, consent, test-user, client, callback, and connection steps. Website reading from supplied URLs is explained separately from Brave discovery. The 58 targeted Gmail/browser/research checks pass; real Gmail consent is still pending. |
+| **39 — Normal Telegram conversation** | Added `domain/conversation.py`, `agent/conversation.py`, `agent/prompts/conversation.py`, `services/conversation.py`, and `connectors/telegram/messages.py`. Updated Telegram handling, shared jobs, limits, demo behavior, tests, guides, and the diagram. Detailed explanations appear below. | Normal messages and file captions can receive answers, read evidence, and support follow-ups without `/new`. Outreach still enters the tested approval workflow. Eighteen new checks cover history, restarts, duplicates, read limits, cancellation, and safe handoff; the complete 376-test suite passes, including local Chromium/OCR. Live Telegram/model behavior remains an account check. |
+| **40 — Model errors and budget explanations** | Updated model error handling, chat notifications, dashboard budget labels, tests, and setup documentation. | Known provider failures explain the cause without exposing secrets. Blocked models and rate limits stop without an automatic retry. Reserved budget is labeled separately from billing. The 391-test suite passes. |
+| **After phase 40 — Prepare xAI configuration** | Added setup fields to `.env.example` and the ignored local `.env`; updated this guide. | This earlier change only reserved a place for the key and model choices. Phase 41 below connects those settings to the application. |
+| **41 — Connect Grok on xAI** | Added `app/llm/xai_client.py` and its tests. Updated provider selection, safe errors, dashboard connection checks, test isolation, environment template, README, and setup/validation guides. | Telegram conversation and outreach can use Grok through the same saved workflow, budgets, and approvals. All 425 tests pass, covering the model-to-approval path, replies, duplicates, safe failures, and tokens. Live account acceptance still needs the owner's Telegram test. |
+| **42 — Supabase state and requested Gmail drafts** | Added private Postgres configuration and restart checks; changed the email path to request-only drafts and manual Gmail sending. Updated Telegram, dashboard, tests, setup, and diagram. Detailed file explanations appear below. | State can use one hosted database. Requested drafts are saved once and announced; normal chat does not draft, and agent sending is blocked. Cloud connection still needs the owner’s project URL. |
+| **43 — Model roles and tool calls** | Added separate instruction, reasoning, and research model choices; connected validated native tool calls to the conversation workflow. | Model requests use the configured role. Unsupported tools and invalid arguments are rejected before execution. Detailed files and checks appear below. |
+| **44 — Stop and continue** | Saved conversation progress, completed tool results, and task links in the existing database and LangGraph checkpoints. | Saying **continue** resumes stopped work with the same goal, evidence, and usage counters. Restart tests check that completed reads are reused. |
+| **45 — Private originals and saved knowledge** | Added Supabase file storage, local embeddings, pgvector retrieval, provisioning, and dashboard search/storage checks. Detailed file explanations appear below. | Earlier files and website passages can be searched across conversations. The 497-test suite passes, and the owner's cloud database, private bucket, checkpoints, and semantic retrieval pass hosted checks. |
 
-**State** is the information needed to continue: your goal, collected evidence, draft, current step, and pending choices. A **checkpoint** saves a workflow's progress. SQLite is the default; configured Supabase stores records and checkpoints in one PostgreSQL database.
-
-## Trace one request
-
-`Telegram → ConversationService.queue() → worker → LangGraph → tools/models → saved result`
-
-Research returns findings. A requested email goes through writing and review. An existing-draft edit uses `DraftEdits.read()` → `prepare()` → your decision → `apply()`. Sending stays manual in Gmail. See the [visual model and email guide](docs/MODELS_AND_TOOLS.md).
-
-## Explore a folder
-
-<details>
-<summary>Application entry and configuration</summary>
+## Application entry and configuration
 
 | File | Purpose, main inputs, and outputs |
 |---|---|
@@ -34,35 +58,14 @@ Research returns findings. A requested email goes through writing and review. An
 | `app/settings.py` | `Settings.from_env()` converts environment values into checked settings. It accepts `xai`, `groq`, or `openai` and defines database, owner, connector, and operating-limit configuration. The template selects xAI; an absent provider setting retains Groq for older installations. It does not contact providers. Secret fields are omitted from the settings object's printed representation. |
 | `app/demo.py` | `build_demo_manager()` supplies fake model, search, browser, and Gmail clients to the real workflow. `DemoModelClient` produces fictional records by the requested record type, including a clearly labeled simulated chat reply. `demo_request()` provides a sample request for tests. Start the demo with `python -m app.main --demo`. |
 | `pyproject.toml` | Lists Python requirements, dependencies, optional test/Postgres packages, the `outreach-server` command, packaged dashboard assets, migrations, and pytest settings. |
-| `.env.example` | Lists configuration names without real secrets. Selects xAI and separate instruction, reasoning, and research models. See [model settings](docs/MODELS_AND_TOOLS.md#model-settings) for their names and [setup](docs/SETUP.md) for alternatives. |
-| `.env` (local only) | Stores your real keys and local settings. Startup loads it automatically. Keep each setting once, because a later empty assignment can override a saved key. This file stays outside Git. |
-| `.gitignore` | Keeps credentials, databases, environments, and generated outputs out of Git. Root `AGENTS.md` and `plan.md` are also local-only. |
+| `.env.example` | Documents configuration names without real secrets. Selects xAI with separate instruction, reasoning, and research models, and a blank `XAI_API_KEY`. The names and their jobs are explained in [model settings](docs/MODELS_AND_TOOLS.md#settings); alternative providers are covered in [setup](docs/SETUP.md). |
+| `.env` (local only) | Stores your real keys and local settings. Service startup loads it automatically. Keep each setting once, because a later empty assignment can override a saved key. Phase 41 preserves the entered xAI key, removes its empty duplicate, and explicitly selects xAI. Other settings stay intact; this file stays outside Git. |
+| `.gitignore` | Keeps credentials, databases, environments, and build outputs out of Git. After phase 39, the root `AGENTS.md` and `plan.md` were also made local-only: their files remain on this computer, but Git no longer tracks future changes to them. |
 | `AGENTS.md` (local only) | Instructions for coding assistants working in this checkout, including documentation and verification expectations. It is ignored by Git and is not included in fresh clones. |
 
 Every `__init__.py` marks its directory as an importable Python package. These files do not start the service or call external providers.
 
-</details>
-
-<details>
-<summary>Conversation, file reading, and saved search</summary>
-
-| File | Main function and input → output |
-|---|---|
-| `app/agent/conversation.py` | `build_conversation_graph()` connects understanding, tool selection, reading, and answering. A message and its saved observations → a reply or requested work. |
-| `app/services/conversation.py` | `queue()` saves a message; `execute()` runs it; `read_tool()` handles allowed reads. User message → saved job → tool results and response. |
-| `app/agent/prompts/conversation.py` | Instructions for friendly conversation and task selection. The current message defines the task; old email discussion does not override fresh research. |
-| `app/services/tasks.py` | `TaskControls.stop()` and `continue_task()` select and pause/resume saved work. A task choice → the same task continued with its evidence and limits. |
-| `app/services/documents.py` | `save_async()` records an uploaded file; `extract()` reads it in a worker. Upload → saved original, extracted text, and reading status. |
-| `app/connectors/documents/extractor.py`, `worker.py` | `extract()` reads supported formats and uses OCR for printed image text. A bounded file → text/pages or a clear extraction error. |
-| `app/agent/nodes/documents.py` | `prepare_documents()` turns attached text into bounded background or research evidence for the outreach workflow. |
-| `app/services/knowledge.py` | `capture_document()` and `capture_page()` save evidence; `index()` prepares it for search; `search()` returns matching passages with sources. |
-| `app/storage/files.py`, `documents.py`, `knowledge.py` | Store file originals, extraction records, and searchable passages. Originals use local files or a private Supabase bucket; records use the configured database. |
-| `app/llm/embeddings.py` | `LocalEmbeddings.passages()` and `query()` turn text into numeric vectors for similarity search. The model runs locally when this optional feature is enabled. |
-
-</details>
-
-<details>
-<summary>Agent core</summary>
+## Agent core
 
 A **node** is a small workflow step. It receives the current state and the run’s services, then returns a dictionary containing only the fields it changed. LangGraph combines those changes with the saved state.
 
@@ -80,7 +83,6 @@ A **node** is a small workflow step. It receives the current state and the run�
 | File under `app/agent/nodes/` | What it does with the state |
 |---|---|
 | `goal.py` | `goal_node()` turns the raw goal into a structured description of whom to find and why. |
-| `direct.py` | `prepare_direct()` builds the email context for known recipients. `direct_brief()` keeps these explicitly requested drafts on the writing path without prospect discovery. |
 | `discovery.py` | `discovery_node()` combines notes, optional search, and browser evidence, then returns sourced prospects and visited-page records. |
 | `qualification.py` | `qualification_node()` scores each prospect against the goal and keeps a bounded list of qualified prospects. |
 | `recipients.py` | `prepare_recipients()` prefers user-supplied addresses, otherwise checks addresses published on cited pages. One candidate can be selected automatically; zero or multiple candidates pause the run. `validate_selections()` requires an address or skip for every pending prospect. `choose_recipients()` resumes with those choices and retains the original evidence. |
@@ -111,10 +113,7 @@ Components perform one task without deciding the overall workflow order. Their i
 
 The files `prompts/goal.py`, `researcher.py`, `qualification.py`, `strategy.py`, `writer.py`, and `reviewer.py` contain model instructions for their matching components. They explain allowed evidence and required output; Python still controls approval, routing, budgets, and external actions. Website text is evidence, not application instructions.
 
-</details>
-
-<details>
-<summary>Shared data and model providers</summary>
+## Shared data and model providers
 
 | File | Purpose, inputs, and outputs |
 |---|---|
@@ -124,14 +123,9 @@ The files `prompts/goal.py`, `researcher.py`, `qualification.py`, `strategy.py`,
 | `app/llm/client.py` | Defines the common structured-model interface, validation/error helpers, OpenAI adapter, and `FakeModelClient`. `generate_structured()` returns a validated record. `ModelProviderError` takes a provider, known reason, and optional HTTP status; its `public_message` returns an application-written explanation safe to show the owner. |
 | `app/llm/groq_client.py` | Sends structured requests to Groq, checks returned JSON, and captures reported token usage. `_request_failure()` translates an HTTP response into a safe failure reason, including organization/project model blocks. Raw provider messages and unknown error codes are not saved or displayed. |
 | `app/llm/xai_client.py` | `XAIModelClient.from_env()` reads the xAI key, model, and reasoning choice. `generate_structured()` takes instructions, input text, and a Pydantic record type; makes one xAI Responses request; then returns a locally checked record, such as a qualification score. It bounds visible output, requests `store=false`, and captures token counts. Incomplete output, refusals, or invalid records stop the call. `_request_failure()` returns fixed error text without copying private provider content. `aclose()` closes the connection it owns. |
-| `app/llm/xai_routing.py` | `role_for()` assigns a task to instruction, reasoning, or research. `XAITaskRouter.generate_structured()` calls that role's configured model and returns a checked result with usage. |
-| `app/llm/tools.py` | `tool_definitions()` lists available reading actions. `checked_call()` validates a requested tool and arguments; `function_history()` pairs saved calls with their results. |
-| `app/llm/router.py` | Optional routing helpers retained for measured experiments. Normal xAI requests use `xai_routing.py`; other configured providers keep their own adapter. There is no automatic cheaper-model fallback. |
+| `app/llm/router.py` | Retains optional measured model-routing helpers. The normal service uses the single configured provider; it does not automatically choose a cheaper model. |
 
-</details>
-
-<details>
-<summary>Connectors</summary>
+## Connectors
 
 A **connector** is an adapter between our application and an external service. Fake adapters implement the same operations using local examples, which lets tests exercise real workflow logic without keys or network calls.
 
@@ -141,21 +135,16 @@ A **connector** is an adapter between our application and an external service. F
 | `app/connectors/telegram/client.py` | `TelegramClient.call()` sends Bot API requests, bounds timeouts, and sanitizes errors. `RateLimited` carries a retry delay. `FakeTelegram` records calls without contacting Telegram. |
 | `app/connectors/telegram/bot.py` | `TelegramBot` sends ordinary text/file captions to the saved conversation queue. `/guided` retains the optional form. It creates review/recipient controls and translates commands into shared-service calls. `poll()` saves owner-only private updates before advancing Telegram’s offset. `process_one()` handles saved updates. `deliver_one()` sends durable outbox messages and avoids blindly repeating an uncertain delivery. Buttons reference saved current versions. |
 | `app/connectors/gmail/client.py` | `GmailClient` searches/reads threads and drafts, creates requested drafts, and updates existing drafts at the same ID after the service checks approval. `encode_message()` creates checked email data; `contact_messages()` extracts conversation text for an exact address. `FakeGmailClient` records simulated operations. The connected adapter blocks agent sending. |
-| `app/connectors/gmail/drafts.py` | `snapshot()` reads a bounded plain-text draft. `updated_raw()` builds its approved replacement while preserving recipients, attachments, and thread information. |
 | `app/connectors/gmail/oauth.py` | `GmailAccount.connect_url()` starts Google sign-in; `complete()` verifies the owner session and granted permissions, then saves the verified address and encrypted tokens. `CredentialVault` encrypts/decrypts secret records. `token()` renews an expired token. `disconnect()` removes local credentials and attempts Google revocation. `BoundGmail` holds the account lock through each request so an approval cannot switch accounts mid-action. |
 | `app/connectors/browser/client.py` | `BrowserClient.read(url)` returns `PageEvidence` using a fresh sandboxed Chromium session. `extract_emails()` accepts addresses actually present in visible text or a single-recipient contact link. `FakeBrowser` returns local evidence. Browser sessions have no personal login cookies, and submissions/downloads/WebSockets are blocked. |
 | `app/connectors/browser/network.py` | `parse_public_url()` checks HTTP/HTTPS URLs and ports. `public_address()` rejects private, local, reserved, or mixed public/private DNS answers. `PublicProxy` connects to the validated IP, covering redirects and subrequests too. This prevents a second DNS lookup from changing the destination to a private service. |
 | `app/connectors/browser/managed.py` | `ManagedBrowser.read()` reserves a page attempt in the database before browsing, saves evidence, and reuses saved evidence on retries. Restarts do not reset limits. |
 
-</details>
-
-<details>
-<summary>Services and persistence</summary>
+## Services and persistence
 
 | File | Purpose and main operations |
 |---|---|
 | `app/services/application.py` | `AgentService` is the shared entry point for both interfaces. `start()` queues outreach; `stage_decision()` saves one choice; `submit_choices()` queues a complete batch; `select_recipients()`, `retry()`, and `cancel()` control saved work. `execute_one()` also runs chat jobs through `ConversationService`. Chat retries stay in the conversation graph. `check_replies()` processes bounded new inbound messages. `overview()`, `list_runs()`, and `details()` return dashboard data and paginated events. |
-| `app/services/draft_edits.py` | `DraftEdits.read()` fetches an existing message; `prepare()` saves proposed changes; `decide()` records your choice; `apply()` updates the same Gmail draft after approval. A changed account/message or uncertain write blocks repetition. |
 | `app/services/runs.py` | `RunManager` connects saved runs to LangGraph. `execute_new()`, `resume()`, `select_recipients()`, and `retry()` execute or continue a saved run. `_execute()` owns leases, checkpoints, failures, and cancellation. `context()` supplies per-run adapters, including an account-bound Gmail client. `real_model_client(settings)` opens only the selected xAI, Groq, or OpenAI adapter on the first model call and closes it afterward. Approval without new model work does not open a connection. |
 | `app/services/runtime.py` | `open_runtime()` opens the database, checkpoint connection, HTTP clients, and configured connectors, then closes them together. Demo mode injects fake services. |
 | `app/services/auth.py` | `OwnerAuth.login()` verifies the configured password and creates an opaque session. Password verification uses Argon2 hashing. `require_owner()` checks either an API key or owner session; browser writes also need a CSRF token, which prevents another site from silently submitting owner actions. Browser sessions expire on restart; saved approvals remain. |
@@ -173,10 +162,7 @@ A **connector** is an adapter between our application and an external service. F
 
 With no Supabase URL, the local installation uses **SQLite**, with two files: `relationships.sqlite3` stores application records and `checkpoints.sqlite3` stores LangGraph progress. A configured Supabase URL instead puts both kinds of state in one hosted Postgres database; local records are preserved but not copied. SQLite files live under `OUTREACH_DATA_DIR`; the demo uses its `demo/` subdirectory. Credentials are encrypted in the application database; their encryption key stays in your environment.
 
-</details>
-
-<details>
-<summary>Dashboard and deployment files</summary>
+## Dashboard and deployment files
 
 | File | Purpose |
 |---|---|
@@ -197,10 +183,7 @@ With no Supabase URL, the local installation uses **SQLite**, with two files: `r
 | `plan.md` (local only) | The working direction, defaults, and acceptance criteria for this checkout. It is ignored by Git; the shared README, setup guide, phase history, and validation record document the published project. |
 | `CONTRIBUTING.md`, `LICENSE` | Contributor workflow and MIT licensing terms. Contributors retain their copyright and license contributions under MIT. |
 
-</details>
-
-<details>
-<summary>Tests and evaluations</summary>
+## Tests and evaluations
 
 The validation record lists completed automated suites, including optional Chromium and real image/scanned-PDF OCR fixtures. All four simulated evaluation scenarios pass. Packaging and restart checks are recorded in [validation](docs/VALIDATION.md).
 
@@ -212,9 +195,6 @@ The validation record lists completed automated suites, including optional Chrom
 | `tests/test_schemas.py`, `test_state.py` | Input types, goal trimming/length, strict records, JSON conversion, and independent run collections. |
 | `tests/test_client.py`, `test_groq_client.py` | Structured response validation, safe provider failure explanations, malformed error bodies, token information, and Groq configuration. |
 | `tests/test_xai_client.py` | Uses simulated HTTP responses to check xAI request bounds, JSON validation, token counts, key selection, and safe errors. Runs a Telegram greeting and a six-call outreach workflow through the real adapter; checks duplicate messages, approval without extra calls, dashboard key status, and bounded retries. No paid model requests are made. |
-| `tests/test_model_routing.py`, `test_research_routing.py` | Check model roles, valid tool arguments, required first reads, and fresh research after an email conversation. All provider responses are simulated. |
-| `tests/test_gmail_draft_edits.py` | Check edit previews, approval/rejection, same-ID replacement, stale decisions, and preserved message content. Gmail is simulated. |
-| `tests/test_documents.py`, `test_supabase_storage.py` | Check file extraction, private storage, and saved-work recovery. Optional PostgreSQL checks use a temporary local database. |
 | `tests/test_researcher.py` | Research limits, accepted evidence, grounded URLs, duplicate prospects, and malformed model output. |
 | `tests/test_full_workflow.py` | Goal-to-draft behavior, qualification, review loops, edit/reject/approve decisions, account/action fingerprints, and duplicate external-action protections. |
 | `tests/test_memory_policy.py` | Supported memory quotes, relevance/expiry, opt-outs, contact timing, and reply handling. |
@@ -234,37 +214,447 @@ The validation record lists completed automated suites, including optional Chrom
 
 Use `python -m pytest` for ordinary offline checks, `RUN_BROWSER_TESTS=1 python -m pytest` to include Chromium, and `python -m evals.run` for the four simulated evaluations. Real Telegram delivery, Google consent, and live Gmail writes are recorded separately in the validation guide.
 
-</details>
+## Phase 37 — Read files and use them in research
 
-## What was built when
+You can now attach files in a Telegram goal conversation or the dashboard's **New run** form. The shared worker extracts text locally, stores it, and passes cited evidence into the existing LangGraph workflow. A file marked **background** describes you; a file marked **research** describes the material you want the agent to investigate. The goal interpreter uses relevant topics and skills to guide the existing search. Drafting, human approval, contact rules, and sending controls still apply.
 
-| Phases | Delivered | Details |
-|---|---|---|
-| 1–30 | Foundation, structured records, outreach steps, memory, evaluations. | [Original phase history](docs/PHASE_HISTORY.md) |
-| 31–36 | Shared service, Telegram, Gmail, browser, dashboard, saved jobs. | [Implementation record](docs/IMPLEMENTATION_HISTORY.md#phase-history-what-changed-when) |
-| 37–42 | File reading, normal conversation, providers, draft-only Gmail. | [File reading onward](docs/IMPLEMENTATION_HISTORY.md#phase-37--read-files-and-use-them-in-research) |
-| 43–45 | Model roles, native tools, continuation, private files, semantic search. | [Model roles onward](docs/IMPLEMENTATION_HISTORY.md#phase-43--model-roles-and-native-tool-calls) |
-| 46–48 | Responsive Telegram, readable progress, direct drafts, immediate starts. | [Telegram improvements](docs/IMPLEMENTATION_HISTORY.md#phase-46--telegram-response-speed-and-visible-task-progress) |
-| 49 | Keyless search, complete emails, approved same-draft edits. | [Phase 49](docs/IMPLEMENTATION_HISTORY.md#phase-49--reliable-tools-complete-emails-and-approved-gmail-edits) |
-| 50 | Smaller visual guides and easier documentation navigation. | Changes below. |
+**OCR** means optical character recognition: turning printed text in an image into editable text. This implementation uses Tesseract locally for images and PDF pages without selectable text. It does not perform general visual reasoning about photographs or charts. Extraction does not require another model key; starting an outreach run can send extracted text to your configured model and use its normal call budget.
 
-<details>
-<summary>Phase 50 — Visual documentation</summary>
-
-| Files | Purpose and change |
+| New or changed file | Purpose, inputs, and outputs |
 |---|---|
-| `docs/assets/workflow.mmd`, `workflow.svg` | Short request overview. Mermaid source → rendered SVG image. |
-| `docs/assets/email-flow.mmd`, `email-flow.svg` | New draft and existing-draft edit paths, including owner approval and manual sending. |
-| `docs/assets/model-routing.mmd`, `model-routing.svg` | Three model roles and application-controlled tool execution. |
-| `README.md` | Project introduction, four usage examples, quick demo, and links. |
-| `docs/SETUP.md` | Essential setup steps, optional connection details, and a short acceptance check. |
-| `docs/MODELS_AND_TOOLS.md` | Visual model map, tool reference, email flow, and saved-work controls. |
-| `FILE_GUIDE.md` | Short code map, expandable folder references, and linked phase summary. |
-| `docs/IMPLEMENTATION_HISTORY.md` | Preserves the previous detailed explanations and all phase records through 49. |
-| `docs/TROUBLESHOOTING.md` | Moves provider/account, file-reading, and restart problems out of the setup path. |
-| `docs/VALIDATION.md`, `docs/VALIDATION_HISTORY.md` | Current verification summary, with the full previous log available separately. |
-| `docs/SUPABASE.md` | Corrects its email-use paragraph to match immediate starts and approved existing-draft edits. Storage setup is unchanged. |
+| `app/domain/documents.py` | Defines `Attachment` (a saved file ID and its purpose), `DocumentPage` (text, page number, reading method), and `DocumentEvidence` (filename, checksum, timestamp, pages, and warnings). `source(page)` returns a stable citation such as `document:...#page=2`. Shared constants bound file size, page count, and extracted text. |
+| `app/connectors/documents/extractor.py` | `extract(bytes, extension, languages)` returns checked pages and visible warnings. PDFium reads PDF text; Pillow decodes images; `recognize_image()` runs Tesseract. `office_text()` reads DOCX/ODT text without following external references. `VisibleHTML` omits script/style content. Unsupported, encrypted, malformed, binary, or oversized inputs fail clearly. |
+| `app/connectors/documents/worker.py` | Runs one extraction in a separate process. Takes a saved local path, format, and OCR languages; writes a bounded JSON result. CPU and Linux memory limits keep parsing separate from the application process. |
+| `app/storage/documents.py` | `DocumentRow` stores file metadata, extraction state, text, warnings, and errors. `document_record()` returns a saved record. Original bytes live under the data directory's `uploads/` folder. |
+| `migrations/versions/v002_documents.py` | Adds the uploads table while preserving existing runs, contacts, and connector credentials. Startup applies this after the earlier service migration. |
+| `app/services/documents.py` | `save()` checks and stores bytes, returning the file record and extraction job. Identical uploads reuse their content identity and extraction. `extract()` runs the isolated reader with a 90-second limit and an environment without provider credentials. `get()`/`list()` return owner-visible results. `recover()` marks interrupted work; `retry()` queues an explicit retry. |
+| `app/services/application.py` | Owns `DocumentService`, executes document jobs on the same single worker, validates attached file IDs, and includes file status in run details. Uploading a file does not start outreach or contact a model. |
+| `app/agent/nodes/documents.py` | `prepare_documents()` loads ready sources into the saved run before interpretation, and adds background text to the sender context. `evidence_records()` pairs each page's text with its filename, purpose, and citation. `bounded_evidence()` returns complete JSON excerpts with space for every source, including escaped text; it reports shortening. |
+| `app/agent/graph.py` | Adds the document-loading step before goal interpretation in the research subgraph. Saved checkpoints preserve loaded evidence. |
+| `app/agent/nodes/goal.py`, `components/goal_interpreter.py`, `prompts/goal.py` | Pass bounded file evidence into the existing interpretation call. The model can use relevant topics and skills as search signals while preserving your original goal. File text is treated as evidence, never as instructions to change approvals, tools, or contact rules. |
+| `app/agent/nodes/discovery.py` | Combines research-file text with supplied notes, keeping filename/page citations. Divides a bounded evidence allowance across pages so a single long file does not consume all available space. |
+| `app/agent/nodes/recipients.py` | Collects addresses present in cited research uploads. Addresses from private files require explicit owner selection; public-page discovery keeps its existing rules. |
+| `app/domain/workflow.py`, `storage/checkpoints.py` | Add attachment references and extracted documents to workflow state, with serialization support for saved/resumed runs. Old runs default to empty file collections. |
+| `app/connectors/telegram/client.py` | `download_file()` uses Telegram's file API with bounded downloads and sanitized errors; `FakeTelegram` supplies local file bytes for tests. |
+| `app/connectors/telegram/bot.py` | Accepts owner documents/photos during a new goal, saves purpose choices, and keeps conversation progress. `/files`, `/clearfiles`, and `/retryfile FILE_ID` inspect or manage the current attachments. Repeated updates reuse saved extraction. |
+| `app/web/routes/control.py` | Adds authenticated upload, status, inspection, and retry routes. Uploads stream with a 10 MiB ceiling and return HTTP 202. Connector status reports OCR availability. |
+| `app/web/static/index.html`, `app.js`, `app.css` | Add the upload area, per-file purpose choices, extraction status, text preview, remove/retry controls, source links, and file evidence in run details. External file content is rendered as text. |
+| `app/settings.py`, `.env.example` | Read `OUTREACH_OCR_LANGUAGES` (default `eng`) for installed OCR languages. |
+| `app/main.py` | Recovers interrupted document extraction during startup. |
+| `app/demo.py` | Keeps fictional goal interpretation compatible with document context. Demo document parsing/OCR is real and local; its model/search/Gmail remain simulated. |
+| `pyproject.toml`, `Dockerfile` | Add PDFium/Pillow dependencies and install English Tesseract in the container. Local OCR installation is described in setup. |
+| `tests/test_documents.py` | Checks real PDF text/page numbers, text/office/HTML formats, extraction limits, malformed files, optional real image/scanned-PDF OCR, upload authentication, saved-job recovery, duplicate uploads, document-driven search, recipient confirmation, and Telegram downloads. It also checks large Unicode pipe output, saved background evidence, complete source references under input limits, and parser cancellation without exposing provider keys. |
+| `tests/test_telegram.py` | Runs the complete guided conversation with either public-browser evidence or an uploaded file. File reading finishes before research, and the shared approval creates exactly one simulated Gmail draft without repeating model calls. |
+| `tests/test_server_recovery.py` | Updates migration checks to the new schema revision while still verifying old contact data survives. |
 
-</details>
+The feature's completed checks and limits are recorded in [validation](docs/VALIDATION.md) and [setup](docs/SETUP.md). Current limits are five files per run, 10 MiB per file, 20 pages/frames per file, 16 megapixels per input image, and 40,000 extracted characters per file. Interpretation shares up to 20,000 text characters across files; research combines notes/file excerpts within 80,000 serialized characters before web evidence. Clipping and OCR methods are visible when you inspect the text. Files are saved across restarts; removing one from a new-run form does not delete saved originals or historical runs.
 
-This phase changes documentation; the application's behavior stays the same. See [validation](docs/VALIDATION.md) for link, diagram, and display checks.
+`README.md`, `docs/SETUP.md`, `docs/API_GUIDE.md`, `docs/VALIDATION.md`, `plan.md`, and `CONTRIBUTING.md` were updated with file usage, the OCR installation step, authenticated upload requests, and reproducible checks. `docs/assets/workflow.mmd` and its SVG now show local file reading before goal interpretation.
+
+## Phase 38 — Prepare Gmail and clarify browsing without Brave
+
+The Gmail connector was already built in phase 33. This follow-up prepares its configuration and makes the sign-in steps easier to follow; it does not claim that the owner's Gmail account has been connected.
+
+- `docs/SETUP.md` now walks through Google Cloud project creation, enabling Gmail, choosing the consent audience, adding a test user, requesting the two Gmail permissions, and creating a **Web application** OAuth client. It gives the exact callback URL and explains saving client credentials in `.env`, restarting, signing in through Connections, and checking the connected address. It also explains how **Public URLs** reads websites without a Brave key, with the existing page/depth limits.
+- `.env.example` now explicitly says it is tracked by Git and must contain no real passwords or keys. It remains a shareable list of setting names and defaults.
+- The local `.env` was created from the user's configuration and excluded from Git. Credentials were removed from the tracked template, and a local encryption key was generated for saved Gmail tokens. Gmail reading is enabled; sending remains disabled. The actual values are never documented or committed.
+- Verification: 58 existing checks in `tests/test_gmail_oauth.py`, `tests/test_browser.py`, and `tests/test_researcher.py` passed. They check encrypted tokens, renewal, account/consent validation, browser restrictions, and grounded research. A real browser request retrieved a public page without Brave; no Gmail account was accessed. The local environment parsed correctly, its encryption key was valid, and `.env` was ignored by Git with owner-only file permissions.
+
+**Still needed from the owner:** create the Google client, enter its client ID and secret in `.env`, and finish Google's consent page. A successful connection must display the actual Gmail address in Connections before it is treated as working.
+
+## Phase 39 — Talk normally in Telegram
+
+Previously, any ordinary message became either an outreach goal or an answer to a form question. This phase adds a conversation layer before outreach. You can now say “Hi,” ask about an uploaded PDF, provide a website to investigate, or ask a follow-up without starting a new run or entering `/new`.
+
+The model chooses between answering and a small set of reading tools. **Read-only** means those tools can retrieve information but cannot approve messages, send email, run terminal commands, or change accounts. When you actually want outreach, the conversation prepares a request for you to start. Research, qualification, contact checks, writing, review, and exact-message approval then follow the existing workflow. A background file can be discussed in chat while remaining separate from the evidence used to identify prospects.
+
+| New or changed file | Purpose, main inputs, and outputs |
+|---|---|
+| `app/domain/conversation.py` | `ConversationAction` checks a model's suggestion: reply, search, read a page, read an attached file, inspect an outreach run, or propose outreach. Its input is model-generated JSON; its output is a validated record. Unknown actions such as `send_email` are rejected. |
+| `app/agent/prompts/conversation.py` | `CONVERSATION_INSTRUCTIONS` explains normal dialogue, follow-ups, choosing tools, citing evidence, and asking only necessary questions. File/page text is evidence, not an instruction to the application. Python enforces the actual permissions and limits. |
+| `app/agent/conversation.py` | `build_conversation_graph()` connects `decide`, `read_tool`, and `answer`. `decide()` takes the latest message, recent history, available tools, and gathered evidence; it returns a checked action. `read_tool()` adds an observation. `answer()` returns text and an optional outreach proposal. The loop stops at the configured limit even if the model keeps requesting tools. |
+| `app/services/conversation.py` | `queue()` accepts a message, conversation ID, file references, and repeat-protection key; it returns a saved job. `execute()` runs that job through LangGraph, saves the answer, and queues a Telegram reply. `_remember()` retains six completed exchanges. `read_tool()` dispatches bounded search/browser/file/status reads. `_page_depth()` permits owner-supplied/search URLs and one level of same-site links. `response()` attaches known citations and builds a concrete outreach proposal. `start_proposal()` starts that exact request through `AgentService`, once, only while it is current. |
+| `app/connectors/telegram/messages.py` | `queue_message()` takes text and optional buttons, splits long replies within Telegram's Unicode limit, and saves outgoing parts. It does not contact Telegram itself. Repeated message keys reuse existing outgoing records. Buttons appear only on the last part. |
+| `app/connectors/telegram/bot.py` | Ordinary messages and file captions now queue conversation work. `/new` resets context, `/guided` opens the optional form, and `/chat` returns to normal messages. `_chat_conversation()` preserves current attachments when leaving old guided state and chooses the same conversation identity when a saved update is replayed. Existing review/edit/recipient controls remain. |
+| `app/services/application.py` | The single worker also executes chat jobs. Retry sends them back to the conversation service, rather than accidentally starting outreach. Failures tell the owner how to retry without exposing provider errors. File-ready notifications now invite questions about the file. |
+| `app/storage/control.py` | `enqueue()` can label a record as `chat` and save its latest-turn marker in the same transaction. A follow-up makes an older outreach-proposal button stale. Existing tables hold this data, so no new database or migration is needed. |
+| `app/services/limits.py` | Adds `max_chat_model_calls` (six by default) and `max_chat_tool_calls` (five). Existing search, browser, timeout, cancellation, and estimated-cost controls still apply. Calls already spent are counted when a failed turn is retried. |
+| `app/demo.py` | The fake model recognizes conversation requests and returns an explicitly simulated answer. Use `/guided` for the existing fictional outreach walkthrough. This demonstrates application behavior, not real model understanding. |
+| `tests/test_conversation.py` | Eighteen checks cover ordinary messages, follow-up context after reopening SQLite, optional reset, queued message order, duplicate updates, extraction before answering a file caption, file access, sourced web answers, missing Brave, URL/depth limits, budget persistence, cancellation, failure recovery, bounded history, and starting the existing approval flow from a conversation proposal. |
+| `tests/test_telegram.py` | Retains the complete guided browser/file → review → simulated Gmail flow under `/guided`. Existing tests still check owner access, restart behavior, stale buttons, message lengths, and delivery limits. |
+| `tests/test_documents.py` | Updates the upload/restart check for normal chat. A file with a question in its caption attaches to the saved conversation and queues reading before answering. |
+
+For example, a PDF captioned “Summarize this” first enters the local file-reading queue. A chat job follows it, reads the extracted text, and answers with filename/page references. “Explain the second point” uses recent history and source excerpts. It does not require an outreach goal, recipient, or email draft.
+
+Messages, answers, and bounded source excerpts live in SQLite. Chat does not checkpoint each intermediate model decision: after interruption you explicitly retry the saved turn, keeping recorded budgets and cached page reads. An answer already saved before interruption is reused. `/new` starts a fresh context; it does not delete historical records or cancel saved outreach runs. Chat jobs and costs appear in dashboard job/usage statistics; a dashboard chat transcript interface has not been added.
+
+`README.md`, `docs/SETUP.md`, `docs/API_GUIDE.md`, `plan.md`, and the Mermaid/SVG diagram describe this working route. `docs/VALIDATION.md` records 376 passing tests including local Chromium/OCR, plus the four simulated outreach evaluations. Live Telegram delivery and Groq's conversational quality still require an account-connected test; no real messages or Gmail actions were sent during these checks.
+
+## Phase 40 — Explain failed model calls and reserved budget
+
+The old generic Telegram failure did not distinguish a blocked model from an invalid key or an exhausted budget. A bounded live diagnostic returned Groq's `403 model_permission_blocked_org`: the key was accepted, but the organization did not allow the configured model. Two earlier failed attempts had added `$0.10` to the app's fixed reservation counter; that counter was not an invoice.
+
+| Changed file | What it now explains or does |
+|---|---|
+| `app/llm/client.py` | `ModelProviderError` accepts a known provider/reason/status and returns safe, fixed explanation text. Unknown provider text cannot become a user-facing message. |
+| `app/llm/groq_client.py` | `_request_failure(response)` identifies key, permission, request, rate-limit, and server failures. Organization and project blocks have distinct explanations. |
+| `app/agent/context.py` | `generate_structured()` saves the safe reason and HTTP status with the failed attempt. It retries temporary connection/server failures once, and stops immediately for known configuration or rate-limit failures. |
+| `app/services/conversation.py` | `execute(job)` saves the safe provider explanation with a failed chat turn so the owner can inspect it later. It still keeps inputs and budgets for explicit retry. |
+| `app/services/application.py` | `execute_one()` puts that explanation in the failed job and Telegram notification. Application limits have their own explanation; arbitrary exception messages remain hidden. |
+| `app/web/static/app.js` | The overview and run details say **Reserved model budget** and **model attempts**. They explain that failed attempts count and that the displayed amount is not money owed. No provider billing data is inferred from this number. |
+| `tests/test_groq_client.py` | Checks safe explanations for HTTP failures, malformed error bodies, hidden credentials, and exactly one request per adapter call. |
+| `tests/test_conversation.py` | Runs simulated provider failures through the real chat worker. Verifies the saved reason reaches Telegram and dashboard data, blocked calls are not repeated, transient server failures get one retry, and reservations stay counted. |
+| `docs/SETUP.md`, `docs/VALIDATION.md` | Explain permission recovery, provider billing versus application reservations, and the checks actually completed. |
+
+**Checked:** 391 automated tests passed, including local Chromium/OCR, plus JavaScript syntax and Git whitespace checks. Tests use fake external services. The live diagnostic identified the permission block; successful live conversation remains unverified. Credentials, model selection, and saved data were preserved.
+
+### After phase 40 — Prepare the xAI key fields
+
+This earlier change added a labeled xAI/Grok section to `.env.example` and the local `.env`, with `XAI_API_KEY`, `XAI_MODEL=grok-4.3`, and `XAI_REASONING_EFFORT=none`. At that point these fields were preparation only and did not change the selected provider. Phase 41 below implements the connection.
+
+The xAI Console controls the key's requests/tokens per minute, expiry, credit balance, and billing limits. Adding environment fields does not change those account controls. Verification parsed both files, checked that all existing local values were preserved, and confirmed that `.env` remains ignored and untracked. No model calls or credential changes were made.
+
+## Phase 41 — Use Grok in Telegram and outreach
+
+The selected provider is now connected to the real application. With `OUTREACH_MODEL_PROVIDER=xai`, a Telegram message passes through the existing saved job queue and conversation graph to `XAIModelClient`. Outreach uses that same adapter for its research reasoning, qualification, writing, and review. The browser, file reader, Gmail checks, and approval process still run in the application.
+
+| Changed file | Purpose in this phase |
+|---|---|
+| `app/llm/xai_client.py` | Converts our instructions and requested record format into one xAI Responses request. `grok-4.3` and reasoning `none` are the starting settings. JSON means structured text that Python can validate before using it. There are no hidden adapter retries or xAI-hosted research tools. |
+| `app/llm/client.py` | Adds xAI to the known provider names and adds safe explanations for missing credits and denied xAI access. Raw errors and keys never become public messages. |
+| `app/settings.py`, `app/services/runs.py` | Accept and select `xai`, open its client only when needed, pass existing timeout/output limits, and close its connection. Missing xAI configuration raises a useful error instead of switching providers. |
+| `app/web/routes/control.py` | `connections(request)` checks the selected provider's key when returning dashboard status. It returns a boolean, never the key. “Configured” means present, not verified by a live call. |
+| `.env.example`, local `.env` | Select xAI explicitly. The template contains no real key. The local file preserves the entered key and removes an empty duplicate that was overriding it. Other credentials and local data are preserved. |
+| `tests/conftest.py`, `tests/test_xai_client.py` | Isolate xAI credentials and check valid/invalid responses, token counts, model selection, Telegram greetings and duplicate updates, saved failure explanations, retry counts, dashboard status, and outreach approval. |
+| `README.md`, `docs/SETUP.md`, `docs/VALIDATION.md`, this guide | List the working adapter, explain its settings and restart steps, distinguish provider bills from reserved budgets, and record offline versus live checks. |
+
+The existing per-call reservation remains a local budget estimate, not xAI pricing. The configured output limit bounds visible text; increasing reasoning above `none` can use additional tokens. Provider credit, spending, and key rate limits remain in xAI Console.
+
+**Checked:** all 425 tests passed, including local Chromium/OCR and the simulated evaluations. The focused provider/conversation/dashboard checks passed 102 tests. No live model call or real Telegram/Gmail message was made. See [validation](docs/VALIDATION.md); live xAI credentials, credits, permissions, and reply quality still need the owner's first Telegram request.
+
+**Restart troubleshooting:** a later Telegram failure came from a server process started before the xAI changes. Its authenticated Connections response still reported `groq`, despite `.env` selecting `xai`. `docs/SETUP.md` now explains that editing files does not reload a running service, how to check the active provider, and why old failed jobs remain in history. `docs/VALIDATION.md` records the graceful restart: health passed, the active provider became `xai`, Telegram connected, and the failed run remained saved. The queue was paused during checks and restored afterward; no paid model request was made. This is an operating instruction, not a new workflow phase or a change to credentials.
+
+**Account-access troubleshooting:** the next owner-triggered retry reached xAI but received `403`, meaning access was denied. A read-only key-status check accepted the key and confirmed its model/endpoint permissions, while reporting `team_blocked: true`. `docs/SETUP.md` explains that this flag belongs to the xAI team and does not reveal whether credits or another account restriction caused it. `docs/VALIDATION.md` records the confirmed flags and the remaining live check. The application stopped after one attempt; its budgets and credentials were not changed. No additional model generation was requested during this diagnosis.
+
+## Phase 42 — Supabase state and requested Gmail drafts
+
+This phase changes the current email behavior: the agent prepares emails only after your instruction and the **Start outreach** action. A search or file question remains conversation. Requested drafts pass contact checks and automated review, are saved in Gmail, and trigger a notification. You review, edit, and send them in Gmail. No agent action can send. Older phase descriptions above record what worked at that time; they do not override this policy.
+
+Supabase is an optional home for the existing state. It uses one PostgreSQL database for application tables and LangGraph checkpoints. No extra Supabase API key, new login system, or file-storage service was added. A schema is a named group of tables; ours is called `outreach` and stays outside the public Data API. Row-level security and removed browser-role grants protect these tables, while the authenticated Python server connects as their owner.
+
+| New or changed file | Main inputs, outputs, and connection to the application |
+|---|---|
+| `app/settings.py` | `from_env()` reads the optional `OUTREACH_SUPABASE_DATABASE_URL`. `use_one_supabase_database()` converts it into both database adapter settings and selects Postgres checkpoints. It rejects conflicting URLs and hides database credentials in printed settings/errors. The old sending environment switch is ignored; `sending_enabled` can only be false. |
+| `app/storage/postgres.py` | `connection_urls(text)` checks and converts the copied URL without printing it. It requires encrypted remote connections and rejects transaction pooler port 6543. `prepare_connection()` selects the private schema. `protect_tables(engine)` removes Data API access and enables row-level security. `database_instance_lock(engine)` holds a database lock so a second host cannot start another worker against the same records. |
+| `app/storage/database.py` | `create_database()` now accepts `private_schema=True` for Supabase, applies existing migrations, and limits open Postgres connections. It returns a SQLAlchemy engine, the application's database connection manager. |
+| `app/storage/checkpoints.py` | `open_checkpointer()` opens a session to the same private schema for LangGraph. A checkpoint contains the run's saved progress; it is separate from the job record that tells the worker what to execute. |
+| `app/services/runtime.py` | `open_runtime()` uses the configured store, holds the database instance lock, opens the checkpoint connection, and protects all tables including those created by LangGraph. It closes these resources together. |
+| `app/main.py` | Demo configuration clears the Supabase setting and uses its separate local SQLite files, preventing a fake walkthrough from writing to the real cloud database. |
+| `app/domain/workflow.py` | `WorkflowRequest` accepts `none` or `draft` as destinations; new `send` requests fail validation. `WorkflowState` still reads historical send records. `Outcome.message_fingerprint` records the exact saved account, recipient, message, and action; it does not pretend the owner already reviewed the email. |
+| `app/agent/prompts/conversation.py` | Explains that drafting needs an explicit request. “Find opportunities” uses research tools; “Create email drafts” can propose outreach. It tells the model to explain the configured batch limit and ask about a smaller batch instead of promising ten emails when only five prospects are allowed. |
+| `app/services/conversation.py` | `execute()` supplies the actual draft limit and disabled sending capability to the conversation model. `response()` shows the destination and batch limit. `start_proposal()` remains the only conversation handoff to drafting and prevents repeated button clicks from duplicating runs. |
+| `app/agent/nodes/approval.py` | `prepare_approval()` lets requested Gmail drafts continue after automated review. App-only drafts and old paused decisions keep their previous review controls. No fabricated human approval is saved. |
+| `app/agent/nodes/external.py` | `external_node()` saves reviewed drafts only after account and contact checks. It records a fingerprint and Gmail draft ID, reuses confirmed results on replay, and keeps uncertain writes blocked. Saving a draft does not update “last contacted,” since nobody has received it yet. |
+| `app/services/runs.py` | `validate_request()` rejects agent sending even for internal callers that bypass normal input validation. `_execute()` also blocks resuming legacy send-mode records before any model or Gmail call. |
+| `app/connectors/gmail/oauth.py` | `ConnectedGmail.send()` and `BoundGmail.send()` refuse immediately, without requesting tokens or contacting Google. Draft creation still uses the existing encrypted credentials and account lock. The low-level protocol client's old send method remains for historical tests but is not reachable through the connected agent. |
+| `app/services/application.py` | `execute_one()` counts confirmed draft outcomes and queues a notification with recipient/subject details and the Gmail Drafts link. It tells the owner to review, edit, and click Send manually. |
+| `app/connectors/telegram/bot.py` | Guided setup offers Gmail drafts or app-only drafts, with no send option. Help explains request-only drafting. `/review` points to Gmail for completed drafts and retains old pending review controls. |
+| `app/web/routes/control.py` | `connections()` returns the storage backend, checkpoint type, and schema name without returning the URL. This lets the owner verify whether SQLite or Supabase is active. |
+| `app/web/static/index.html`, `app.js` | The request form labels draft destinations and removes sending. Connections shows **Saved state**. Completed draft runs show **Open Gmail Drafts** and manual review instructions. The old sent counter is labeled as historical; manual Gmail sends are not inferred from saved drafts. |
+| `evals/scoring.py` | `score_run()` checks saved drafts against their account/message fingerprint, automated review, and contact decision. Missing support or any agent-send outcome lowers the workflow-rule score. |
+| `Dockerfile` | Installs the existing `postgres` dependency extra so the packaged service can use the same Supabase configuration. The container image itself still needs a Docker-capable host for a build check. |
+| `.env.example`, local `.env` | Add one blank optional Supabase URL. The shared template removes the old sending switch. Local credentials, operating limits, and database files are preserved; the local environment file is never committed. |
+| `docs/SUPABASE.md` | Project creation, session-pooler URL, startup, connection verification, state explanation, and backup instructions. It clearly states that SQLite records are preserved but not automatically migrated. |
+| `README.md`, `docs/SETUP.md`, `docs/API_GUIDE.md`, `docs/VALIDATION.md`, `docs/assets/workflow.mmd`, `workflow.svg` | Describe the current draft-only flow and storage choices. The diagram shows human review and sending outside the agent. Validation distinguishes real local Postgres from a cloud account connection. |
+
+For example: “Create outreach drafts for these five companies” → owner starts the proposal → sources and contact checks → automated draft review → saved Gmail drafts → notification → owner reviews/sends in Gmail. Qualification, recipient evidence, and budgets can result in fewer drafts; the app never increases spending limits to meet a requested count.
+
+| Changed tests | What they check in everyday language |
+|---|---|
+| `tests/test_supabase_storage.py` | URL validation and secret hiding; real temporary Postgres stores jobs/checkpoints and resumes a paused run after reopening; another service is blocked; browser roles cannot access private tables; a saved Gmail draft is reused after restart instead of being created twice. The database is local and disposable, with no cloud credentials. |
+| `tests/test_full_workflow.py` | Requested Gmail drafts need no extra app approval. Failed review and contact opt-outs prevent creation. Replaying a draft reuses its result; uncertain writes stay blocked. Old sending flags and saved send-mode runs cannot send. |
+| `tests/test_full_api.py` | The authenticated API rejects `gmail_action: "send"` before queuing work. |
+| `tests/test_gmail_oauth.py` | Account changes block draft writes. Both connected send methods fail before any HTTP request, even with expired credentials. |
+| `tests/test_conversation.py` | An email proposal creates nothing until the owner starts it. Repeated starts create one run; completion produces one draft and manual-send guidance. The model receives the actual batch limit. Existing ordinary-chat/file checks still show no automatic outreach. |
+| `tests/test_telegram.py` | Guided browser/file flows save requested fake Gmail drafts, return the same saved run through dashboard data, notify the owner, and ignore repeated starts. |
+| `tests/test_service.py` | Counts a draft only after Gmail confirms creation; no send or invented human-approval count is added. |
+| `tests/test_server_recovery.py` | Cancellation during draft creation lets the in-flight result finish recording before stopping. |
+| `tests/test_evaluations.py` | Wrong accounts/actions, missing review records, and agent sends fail the workflow checks. |
+
+**Available now:** local SQLite and optional Supabase configuration, durable state, explicit requested drafts, owner notifications, and manual sending. **Still account-dependent:** creating your Supabase project, adding its URL, connecting Gmail in the selected store, and resolving the model provider's account access. Existing SQLite records are not migrated by this change. Additional orchestration/approval features have not been added. Completed checks are recorded in [validation](docs/VALIDATION.md).
+
+## Phase 43 — Model roles and native tool calls
+
+A model role means the kind of work we ask a model to do. With xAI selected, 4.3 understands instructions and writes messages, 4.20 handles reasoning and chooses tools, and 4.20 Multi-Agent analyzes research evidence. A greeting can finish after one 4.3 call. Models are selected by the application, not by model-generated code. These are the owner's requested roles; comparative quality measurements have not been claimed.
+
+| New or changed file | Purpose, main inputs, and outputs |
+|---|---|
+| `app/llm/xai_routing.py` | `role_for(record_type)` assigns a role. `configured_models()` reads non-secret model names. `XAITaskRouter.generate_structured()` takes instructions, evidence, and an expected record type, calls the corresponding model, and returns the validated record. `_select_tool()` accepts exactly one permitted native function call or a final answer. Clients are opened lazily and closed together. Research uses four agents and no provider-hosted search tools. |
+| `app/llm/tools.py` | `tool_definitions(inputs)` advertises available reading tools. `checked_call()` validates a returned name, identifier, and exact argument fields. `function_history()` pairs saved calls with their results so the next reasoning call can use them without provider-hosted conversation storage. For example, a `read_file` request must contain an attached document's ID, never a filesystem command. |
+| `app/llm/xai_client.py` | `request(body)` performs one HTTP request and reads safe usage fields, including reasoning tokens when available. `parse_structured()` validates ordinary JSON records and rejects unexpected tool output. The reasoning-effort parameter can be omitted for 4.20. The previous single-model adapter remains available. |
+| `app/domain/conversation.py` | `ConversationInstruction` identifies the first 4.3 pass. `ConversationAction` adds research analysis and a call ID used to match tool results. An instruction-pass tool suggestion is checked by the reasoner before execution. |
+| `app/domain/research.py` | `ResearchAnalysis` holds a summary and exact source references. It describes an analysis of collected text, not proof that the model independently visited a page. |
+| `app/agent/conversation.py` | `understand()` uses 4.3 for the initial instruction pass when routing is enabled. `decide()` selects tools or a final response with the reasoning model and leaves room in the call budget for analysis and an answer. Other providers keep their single-model loop. |
+| `app/agent/context.py` | The managed model wrapper exposes routing capability and adds role/model information to call events, including failures. Every routed and nested research call still reserves the existing budget. |
+| `app/services/conversation.py` | `read_tool()` can analyze already collected evidence, rejects invented source references, and records a tool ID, duration, outcome, and source count. It retains native call/result pairs for the next reasoning request. Search, browser, file, and Gmail restrictions remain enforced by their services. |
+| `app/agent/prompts/conversation.py` | Explains when research analysis is useful and requires collecting evidence first. Email drafting still needs an explicit owner request. |
+| `app/services/runs.py` | `real_model_client()` selects the new router for xAI and opens it only when a model call is needed. `RunManager` also retains its checkpointer for use by the conversation graph in the following phase. |
+| `app/settings.py`, `.env.example`, local `.env` | Enable xAI task routing and name the three models. The local update preserved all credentials and other settings. `XAI_TASK_ROUTING=false` keeps the previous single-model path for troubleshooting. `.env` is ignored and never committed. |
+| `app/web/routes/control.py`, `app/web/static/app.js` | Connections displays the configured role-to-model mapping. This checks configuration presence, not live model permissions or credits. |
+| `tests/test_model_routing.py` | Fake HTTP responses pass through the real conversation/outreach graphs. Tests check the role sequence, function-call arguments, matching results, research sources, budgets, and rejection of unknown, unavailable, duplicate-batch, or malformed tools. No paid requests occur. |
+| `tests/test_xai_client.py` | Existing single-model compatibility tests explicitly select that mode; new routing behavior has its own tests. |
+| `docs/MODELS_AND_TOOLS.md`, `docs/SETUP.md`, `README.md` | Explain the working model roles, tool flowchart, configuration, limitations, and how to inspect events in plain language. |
+
+**Checked:** focused routing, provider, conversation, outreach, checkpoint, API, and shared-service suites passed; dashboard JavaScript syntax passed. Native calls use mocked HTTP, with no real Telegram/Gmail messages or paid inference. Live quality and provider access remain account-dependent. Search discovery still needs Brave; file/URL reading and research analysis can work without it. Chat checkpoint recovery and natural-language continuation are the next change, not part of this phase's completion.
+
+## Phase 44 — Remember stopped work and continue it
+
+State management now covers intermediate chat steps as well as outreach. State means the saved information needed to keep working: the original request, current action, collected evidence, and what comes next. A checkpoint is a saved snapshot of that state. For example, if a page has been read and the next model call fails, **continue** resumes with that page's text already available. Unfinished task links remain available even after many later questions; only the index of completed tasks is shortened.
+
+**Working behavior:** say **stop** to pause at a safe boundary and **continue** to resume. Both commands also accept an explicit ID: `/stop RUN_ID`, `/continue RUN_ID`. If the application itself stops, restart it before continuing. Several unfinished tasks require choosing one. A recipient/review pause still requires its actual decision. Completed tasks are not restarted. `/cancel RUN_ID` remains a permanent cancellation; `/new` starts a separate conversation.
+
+| New or changed file | Purpose, main inputs, and outputs |
+|---|---|
+| `app/services/tasks.py` | `remember(session_id, run_id)` links saved work to its Telegram conversation. `select()` finds one task or explains ambiguity. `stop(run_id)` saves a resumable stop flag and removes queued execution from the worker's active queue. `continue_task()` reads the checkpoint and returns a queued job or a plain explanation of the pending decision/status. It retains the run ID and never changes recipients, approvals, Gmail account bindings, or budgets. |
+| `app/agent/conversation.py` | `ConversationState.inputs` saves the original message/context. `build_conversation_graph(checkpointer)` now saves each instruction, decision, reading, and answer step. Each step logs its name and uses a distinct cache scope so a new decision is not confused with retrying the old one. |
+| `app/services/conversation.py` | `config(run_id)` uses a separate `chat:RUN_ID` checkpoint thread. `execute()` resumes the saved graph with its original inputs and observations. `_save_progress()` records the next step and count of retained tools in everyday dashboard data. `read_tool()` caches completed results before the next graph checkpoint. `queue()` and `start_proposal()` register the conversation's tasks. Completed answers and notifications continue to reuse their existing records. |
+| `app/agent/context.py` | The managed model wrapper caches each validated response by run, task, exact input/schema, and workflow revision. This prevents repeating finished calls inside a step interrupted before its next checkpoint. Search results are cached by run/query. A cache is simply a saved result. Cache hits are logged separately and do not reserve another paid call. Failed requests are not cached. |
+| `app/agent/graph.py` | `observed()` assigns a cache scope using the node name and revision/version counters. Intentional re-reviews still run even if the draft text is unchanged. A context variable keeps concurrent work from mixing scopes. |
+| `app/agent/nodes/common.py` | `for_each()` lets in-flight prospect operations finish recording their results before propagating a stop/cancel. A stop does not become a failed qualification or review result. |
+| `app/services/cancellation.py` | `RunStopped` means resumable stop. `check_cancelled()` checks both that flag and permanent cancellation at existing safe boundaries. It does not interrupt a Gmail write midway through recording its outcome. |
+| `app/domain/workflow.py` | Adds `stopped` as a valid progress value so saved stopped runs can be read and resumed normally. |
+| `app/services/runs.py` | `_execute()` saves stopped outreach progress and waits for each checkpoint to be durable before advancing. Retrying a completely finished checkpoint only saves its result. Pending graph interrupts still require recipient/review decisions. |
+| `app/services/application.py` | Installs the shared task controller, allows retry of stopped work, records stopped job/run status, and returns saved progress in run details. Stop and continue use the same worker as normal execution. Returning to an older chat task makes its newly produced proposal current again; later messages still invalidate stale proposals. |
+| `app/connectors/telegram/bot.py` | `_task_command()` recognizes short phrases such as “please continue,” “resume,” and “stop” without spending a model call. Guided outreach now retains its conversation/task link after starting. Help explains the new controls. Unauthorized updates still cannot reach these handlers. |
+| `app/web/routes/control.py`, `app/web/static/app.js` | Add owner-protected stop/continue endpoints and dashboard buttons, stopped counters, and a saved-next-step display. A continuation waiting for a decision returns an explanation rather than queuing work. |
+| `tests/test_task_continuation.py` | Reopens real SQLite checkpoints after a model failure and continues through Telegram with the same request/evidence/budget. Also checks stop during a read, recovery between result saving and checkpointing, queued stops, duplicate continuation, ambiguous tasks, recipient/review pauses, permanent cancellation, exhausted budgets, outreach continuation, retention after many later questions, renewed proposal freshness, and owner authentication. |
+| `README.md`, `docs/SETUP.md`, `docs/API_GUIDE.md`, `docs/MODELS_AND_TOOLS.md` | Explain how to stop, resume, inspect progress, and distinguish resumable stop from permanent cancellation. API documentation describes when a continue response includes a new job. |
+| `docs/assets/workflow.mmd`, `docs/assets/workflow.svg` | The editable flowchart and rendered README image now show model roles, saved conversation evidence, and continuing the same task. |
+| `docs/VALIDATION.md` | Records the completed checks and distinguishes local/fake verification from live provider/account testing. |
+
+The existing application tables store task links, stop flags, and cached results; the existing SQLite or Postgres checkpointer stores graph snapshots. No new database, migration, or key is required. Network calls interrupted before saving a result may be repeated. Uncertain Gmail writes remain blocked. Old chat jobs created before this phase do not acquire missing historical checkpoints; they can retry from their saved input. Model failures caused by account access or exhausted budgets must still be resolved; “continue” never resets spending.
+
+**Checked:** the full 470-test suite passed with real local Chromium, OCR, and temporary Postgres checks enabled, including the new restart scenarios. Four simulated evaluations passed. JavaScript syntax and Git whitespace checks passed. No paid inference or real Telegram/Gmail message was sent. The real server needs a restart to load these changes; a live xAI conversation still depends on account credits and model access. A broader validation dashboard remains later work.
+
+## Phase 45 — Supabase originals, semantic search, and storage validation
+
+This phase connects the existing state-storage design to a private file bucket and a searchable owner library. PostgreSQL stores tasks and LangGraph checkpoints; pgvector searches saved passages by meaning; Supabase Storage holds original file bytes. One Supabase project provides both services. The Python service continues to run the agent.
+
+You create the Supabase project and enter its database URL, HTTPS project URL, and backend secret key privately in `.env`. `python -m app.setup_storage --download-model --fresh-start` then creates tables, extensions, indexes, and the private bucket, while backing up local test data. It preserves Telegram's processed-update cursor so old messages are not restarted. Later setup runs omit `--fresh-start`. The code works with local substitutes before cloud credentials are entered; that does not establish that a cloud account is connected.
+
+An **embedding** is a list of numbers representing a passage's meaning. The English BGE model runs locally through FastEmbed, producing 384 numbers per passage. It needs a one-time public model download, CPU time, and disk space; it needs no embedding API key. Existing Grok calls still use their normal provider account. Images enter the library through OCR text; this phase does not compare visual image features.
+
+For example, an uploaded CV may say “Built API observability systems.” A later question about “monitoring slow requests” can retrieve that passage even when the words differ. Search combines vector similarity with keyword ranking, returns up to five passages, and preserves filenames/pages, URLs, source hashes, dates, and background/research roles. Matches are evidence candidates, not guarantees of truth. Historical web pages may need refreshing.
+
+### New and changed files
+
+| File | Purpose, main inputs and outputs, and connections |
+|---|---|
+| `.env.example`, ignored `.env` | Keep the active xAI, Telegram, Gmail, browser, Supabase, and usage fields. Remove redundant defaults and empty legacy database fields. Preserve real credentials and customized limits. An ignored `.env.before-supabase-cleanup` recovery copy keeps the previous local configuration. |
+| `app/settings.py` | Read the project URL, backend secret, file backend, and semantic-search switch. Validate the cloud file configuration before use. Hide database and storage credentials from settings output. The existing single database URL still selects PostgreSQL for both records and checkpoints. |
+| `app/setup_storage.py` | `setup()` takes settings and optional download/fresh-start flags, provisions resources, and prints safe validation outcomes. `backup_local()` copies stopped-service SQLite records and originals and returns the saved Telegram cursor. Setup uses the existing service lock and never deletes cloud records or calls Grok/Gmail. |
+| `app/storage/files.py` | `LocalFiles`, `SupabaseFiles`, and `FakeFiles` implement asynchronous original-file writes, reads, and deletion. `ensure_bucket()` creates/checks the private bucket and file limit. Supabase uses the backend key only on its own endpoint and refuses redirects. Lost upload responses are reconciled against the existing object's checksum. |
+| `app/storage/documents.py` | Add the original's backend and object key to each document record. Earlier documents default to local storage, so changing configuration does not silently reinterpret their paths. |
+| `app/services/documents.py` | `save_async(filename, bytes)` confirms cloud persistence, saves metadata, and queues extraction. The existing synchronous `save()` remains for local callers. `original(id)` returns checksum-checked bytes. `extract(id)` uses a restricted temporary file, runs the existing parser/OCR process, removes the temporary file, and queues knowledge indexing. `list()` now reads metadata in one query. |
+| `app/llm/embeddings.py` | `LocalEmbeddings.prepare()` loads the cached BGE model or permits its initial download during setup. `chunks(text)` splits within a page using actual token offsets; `passages(texts)` and `query(text)` return validated vectors. A small lock protects the model/tokenizer while CPU work runs in a background thread. `FakeEmbeddings` supplies deterministic test vectors; it does not measure semantic quality. |
+| `app/storage/knowledge.py` | Define source versions and passages, including text, reference, page, role, retrieval date, content hash, revision, and embedding version. PostgreSQL uses a 384-dimensional pgvector column; small local/offline stores use JSON vectors. |
+| `app/services/knowledge.py` | `capture_source()` saves bounded source text, prepares keyword passages, and queues indexing without calling a model. `capture_page()` handles real browser evidence; `capture_document()` handles extracted files. `index(id)` computes vectors and publishes a whole source version in one transaction. Failures preserve the previous searchable version. `search(query)` returns bounded hybrid matches or a labelled keyword fallback. `sources()` lists paginated metadata; `reindex()` queues an explicit rebuild; `recover()` marks interrupted indexing for inspection. |
+| `migrations/versions/v001_connected_service.py` | Freeze the original table list so importing a newer model cannot create it before its required migration. Existing application records remain intact. |
+| `migrations/versions/v003_knowledge.py` | Add file locations, source/passage tables, relational indexes, the vector extension, a cosine vector index, and a keyword index. A migration is a recorded, repeatable database change. Supabase supplies pgvector; self-hosted PostgreSQL needs the extension installed. |
+| `app/connectors/browser/managed.py` | Save the text of actually read public pages into the knowledge library, including cached pages. Preserve the existing page budgets, public-network restrictions, and retry behavior. |
+| `app/connectors/telegram/bot.py` | Await asynchronous file saving so uploading an original does not block the message handler. Existing owner restrictions and attachment-role choices still apply. |
+| `app/domain/conversation.py`, `app/llm/tools.py` | Add the `search_saved(query)` action and strict function schema. Advertise it only when enabled; reject unavailable tools and invalid arguments. Saved results keep their native function-call identifiers through the existing replay mechanism. |
+| `app/agent/prompts/conversation.py` | Explain when to search older knowledge, how to cite it, when current web research is needed, and why owner background must not become evidence about a prospect. |
+| `app/services/conversation.py` | Dispatch `search_saved`, record its passages in tool observations, and retain them in checkpoints and history. Preserve an attached file's current role. Exclude background passages and background-derived analysis from prospect-research proposals. Retrieved public URLs can be reread through the restricted browser. |
+| `app/services/application.py` | Install knowledge/file services and accept replaceable file/embedding adapters for tests. The same worker handles extraction, indexing, and storage validation. Successful background indexing does not send extra chat notifications. |
+| `app/main.py` | Recover interrupted knowledge indexing during startup. Demo startup clears cloud database/file credentials and uses `.data/demo` with local files. Login and session reads run in background threads so slow database access does not hold up other requests. |
+| `app/services/storage_validation.py` | `validate_storage(service)` creates isolated probe records, a checkpoint, a small original, and a searchable passage. It reports each check and duration, checks private access, removes probes, and reports cleanup failures. Disabled semantic search is marked skipped. Exceptions use fixed safe messages. No Grok/Gmail calls occur. |
+| `app/web/routes/control.py` | Add owner-protected original download, source listing, search, reindex, and queued validation endpoints. Search validates trimmed input. Connector status includes the file backend, knowledge/model status, and latest report. Duplicate validation request keys reuse the existing job. Read-only database handlers use FastAPI's thread pool: a background thread waits for cloud responses while the main request loop remains available for tools and health checks. |
+| `app/services/auth.py` | `require_owner(request)` checks the saved browser session in a background thread, then applies the same owner and request-token rules. This keeps a slow database lookup from blocking the agent's file requests. |
+| `app/web/static/index.html`, `app/web/static/app.js` | Add the Saved knowledge view, search results with cited text, source dates/status, reindex controls, and original downloads. Connections shows storage validation and per-check outcomes. External text uses safe DOM text nodes. Search input is retained during refresh. |
+| `pyproject.toml`, `Dockerfile` | Add the optional `semantic` installation extra, include the retrieval fixture in packages, and install the semantic extra in the server image. Model artifacts remain in persistent `.data/models`, outside Git. |
+| `evals/retrieval.py`, `evals/retrieval_cases.json` | Measure the actual local model on seven questions over twelve English passages. Compare hybrid and keyword-only ranking; report recall among the first five results and mean reciprocal rank. The latter rewards finding the expected passage nearer the top. This evaluates retrieval, not generated-answer accuracy. |
+| `tests/test_knowledge_storage.py` | Check secret handling, private bucket creation, uncertain uploads, checksum conflicts, cloud-like originals across restarts, indexing publication/failures, keyword fallback, cross-conversation search, native tool restrictions, dashboard authentication, validation cleanup, backup/cursor preservation, real pgvector persistence, and stopped-search continuation without a repeated query. |
+| `tests/test_server_recovery.py` | Continue checking that migrations preserve existing contacts and repeat safely; update the expected latest migration revision. A new check starts demo mode with fictional cloud credentials and verifies that it clears them and selects local files and checkpoints. |
+| `tests/test_full_api.py` | Two new checks deliberately pause a dashboard read or a browser-session lookup. A health request must finish before that paused read is released, showing that waiting for the database does not block unrelated requests. |
+| `README.md`, `docs/SETUP.md`, `docs/SUPABASE.md`, `docs/API_GUIDE.md`, `docs/MODELS_AND_TOOLS.md` | Explain the working database/file/search setup, private key roles, new endpoints and tools, original downloads, validation, and the difference between saved knowledge and task checkpoints. |
+| `docs/assets/workflow.mmd`, `docs/assets/workflow.svg` | Update the editable diagram and rendered README image with saved-knowledge search, local embeddings, and private originals. |
+| `THIRD_PARTY_NOTICES.md` | Attribute the optional MIT-licensed BGE embedding model and explain that its downloaded files are outside Git. |
+| `docs/VALIDATION.md` | Record the automated, retrieval-quality, browser, and cloud-connection evidence separately. |
+
+### What is verified and what still needs your account
+
+The full **497-test suite passed**, including real local PostgreSQL/pgvector, Chromium, and OCR checks. These include closing/reopening a PostgreSQL-backed stopped conversation and continuing with saved passages and budgets, without another embedding query. Follow-up checks cover demo isolation and responsiveness during slow database reads. Confirmed Gmail duplicate protection remains covered by the retained tests.
+
+The real local embedding evaluation retrieved the expected passage among the first five results for **7/7 questions**, compared with **2/7** for keyword-only retrieval on this small fixture. Hybrid mean reciprocal rank was **0.929**. These are small-fixture retrieval results, not a production accuracy claim. All four simulated outreach evaluations also passed; these use scripted model responses and remain separate from this real-embedding check.
+
+A real Chromium walkthrough signed in, uploaded a fictional text file, waited for indexing, searched the library, inspected its cited passage, ran storage validation, and downloaded the unchanged original. It used isolated local data and fake embedding/external services. The rendered dashboard and updated flowchart were inspected. Package dependency, JavaScript syntax, and Git whitespace checks passed.
+
+**Cloud setup follow-up:** the owner added the three credentials privately. The database password's URL formatting was corrected locally, local records were backed up under `.data/backups`, and the service switched to Supabase PostgreSQL, private originals, and semantic search. All six hosted storage checks passed. The cloud contains 20 protected application/checkpoint tables and both knowledge-search indexes. Old local test runs were archived rather than imported. Telegram reports connected. Reconnect Gmail from Connections because the new database starts without its saved Google tokens. Live model answers and real Gmail drafts remain account checks; no paid model call or real email was needed for setup.
+
+A real browser opened the live Connections screen, ran another hosted validation job during dashboard refresh, confirmed all six results passed, and opened Saved knowledge. The saved report survived a service restart. See [the validation record](docs/VALIDATION.md) for the completed hosted checks and remaining owner-account checks.
+
+### Phase 45 follow-up — Checking your own connected application
+
+After the owner changed the database password, a fresh connection and all six hosted storage checks passed again. The service restarted with the saved password and retained its queue setting. Read-only xAI checks confirmed that the key and team were unblocked and all three selected models were listed; a live generated answer still needs a separate test. Telegram was connected, public-page reading worked, Gmail needed reconnecting, and Brave discovery had no configured key.
+
+- `docs/SETUP.md` now includes **Check your connected application**, a plain-language checklist for dashboard login, storage validation, a real Telegram answer, file reading, saved-document recall, website reading, search discovery, stop/continue across a restart, and an explicitly requested Gmail draft. Each step says what result to look for. It explains why a configured key alone does not prove generation works.
+- `docs/VALIDATION.md` records the password recheck and separates real connection/storage checks from model generation and Gmail actions that were not performed. No application functions or automated tests changed in this documentation follow-up.
+
+## Phase 46 — Telegram response speed and visible task progress
+
+Recent simple chats took 24–42 seconds from job creation to completion, while their recorded model steps took about 3–5 seconds. The application made many separate cloud-database requests and waited for them on the same loop that handles Telegram messages. This phase reduces those requests and moves important waits into background threads. A thread lets the database operation wait while the application continues handling network activity. The selected models, tool limits, saved checkpoints, and Gmail draft rules remain in place.
+
+As originally built in this phase, Telegram showed one updating status message with the current stage, elapsed time, and task ID. **Phase 47 below replaces that display** with three plain labels and no technical details. The separate typing indicator and durable final-reply delivery remain.
+
+| New or changed file | Purpose, main inputs, and outputs |
+|---|---|
+| `app/services/progress.py` | `ProgressTracker.queued(job)` remembers a pending task. `track(job)` associates execution events with that job. `record()` turns known event names into fixed stage labels; `finish()` records the terminal display state. `finish_waiting()` updates queued work that was stopped or cancelled. `snapshot()` returns small summaries to Telegram. This bounded, thread-safe display data lives temporarily in memory; it does not replace database state. |
+| `app/connectors/telegram/progress.py` | `TelegramProgress.tick()` reads those summaries and sends or edits one status message per task. It renews typing about every four seconds, limits edits to one every three seconds per task, and updates elapsed time about every 15 seconds during a long stage. Rate limits pause progress delivery. An uncertain initial send is not repeated, and status failures cannot fail a job or approve/send mail. |
+| `app/connectors/telegram/bot.py` | `process_one()` still checks saved updates and current buttons, but database work and synchronous message/callback handling wait in threads. `_callback()` keeps the existing controls together. `_claim_delivery()` and `_finish_delivery()` preserve durable final-message handling without blocking the network loop. `poll()` reuses the saved update position in memory only after persisting received updates. `show_progress()` runs the separate status-delivery loop. File uploads register their reading jobs for progress display. |
+| `app/services/application.py` | `execute_one()` claims a queued job in a thread, then `_execute_job()` runs it inside a progress scope and records its outcome. The existing single worker remains authoritative. Idle queue checks now wait up to one second between attempts. `start()` registers pending outreach; cancellation updates waiting status messages. |
+| `app/services/conversation.py` | `queue()` registers a saved chat for progress. `execute()` reads related history, profile, and cached-result values together, and offloads database waits while retaining the same graph and checkpoint behavior. Related result pointers save in one transaction. File reads, tool caches, answer preparation, and final delivery preserve their previous restrictions and saved results. |
+| `app/agent/context.py` | Managed model/search calls continue reserving budgets before external calls, retaining successful results, and recording outcomes. Their database controls, reservations, caches, and events now wait in threads. No extra model call is added for a status update. |
+| `app/connectors/browser/managed.py` | `ManagedBrowser.read(url)` keeps its public-page rules, saved page budget, evidence, and retry cache. Its database controls, page reservations, cached results, and source-saving operations now wait in threads too. Browser-start events select the website-reading status in both conversation and outreach. |
+| `app/agent/conversation.py`, `app/agent/graph.py` | The observed graph steps await threaded control/event writes. Chat reads its usage count and prepares its response without blocking network handling. Stage events still describe the same instruction, reading, writing, and review steps. |
+| `app/storage/control.py` | `set_value()` inserts or updates a small record in one database statement instead of checking first. `get_many()` reads related values together; `put_many()` saves related values in one transaction. `work_controls()` reads cancellation and stop flags together, freshly every time. `claim()` checks queue pause inside its job query. Telegram positions and conversation records use the same smaller updates. |
+| `app/storage/events.py` | `trace()` publishes a stage event to the current progress observer and saves the existing execution record. `atrace()` does that database work in a thread. The observer selects fixed labels rather than displaying arbitrary event data. |
+| `app/services/cancellation.py`, `app/services/tasks.py` | Cancellation and resumable stopping share the combined fresh control read. `acheck_cancelled()` provides the asynchronous wrapper. Stopping queued work also finishes its waiting status; active work finishes recording its current call before stopping. |
+| `app/storage/database.py` | Named, temporary in-memory SQLite databases use separate pooled connections with serialized short transactions. This prevents parallel threaded test sessions from sharing and interfering with one physical transaction. Normal on-disk SQLite and PostgreSQL keep their existing storage selection. |
+| `app/main.py` | Starts and monitors the Telegram progress loop alongside polling, message handling, and the single worker. It participates in the existing graceful shutdown. |
+| `tests/test_telegram_progress.py` | Checks one message changing through real stage events, typing renewal, elapsed-time updates, rate-limit waits, uncertain-delivery suppression, safe display text, final replies surviving status failure, and progress continuing while a database/model call is deliberately held open. |
+| `tests/test_storage_concurrency.py` | Twenty parallel reservation attempts share one ten-call budget. Exactly ten succeed, and the saved count and reserved cost remain correct. |
+| `tests/test_task_continuation.py` | Updates the deliberate crash hook for asynchronous event writing. It still checks that a completed model result survives a crash before the next graph checkpoint and is reused on continuation. |
+| `README.md`, `docs/SETUP.md`, `docs/MODELS_AND_TOOLS.md`, `docs/VALIDATION.md` | Explain the working status display, speed changes, checks, and limitations. Setup also clarifies that Google app keys and the connected Gmail account are separate parts of one shared Telegram/dashboard connection. |
+
+**What this enables:** task stages remain visible while normal conversation or model bookkeeping waits on the database. Research and model generation still take their real execution time. Display updates are temporary; saved work, stops, budgets, decisions, and email-action protection remain durable. See [validation](docs/VALIDATION.md) for the checks and measured comparison.
+
+**Checked:** all **504 tests passed**, including real local PostgreSQL/pgvector, browser, and OCR checks. The new tests exercise status messages and deliberate waits without contacting Telegram or a paid model. A local comparison with artificial database latency reduced SQL statements from 75 to 55 and kept the network loop responsive; it does not predict a fixed live reply time. Optimized queries also passed against the real Supabase database and removed their temporary test records. The restarted service reported healthy with Telegram and Gmail connected. No paid answer or real draft was created for these diagnostics.
+
+### Phase 46 follow-up — Recovering a silent Telegram background failure
+
+The web service was running, but health reported `degraded` and Telegram had a waiting message that the application had not received. Read-only checks confirmed the bot token worked and no webhook was blocking polling. The old service did not record which background task had exited or its exception. Inspection found that temporary database failures could escape the polling, handling, and worker loops. This change handles those failures and makes any other unexpected exit visible.
+
+| File | What changed and how it connects |
+|---|---|
+| `app/services/background.py` | New shared loop support. `run_loop(name, stop, step, health)` calls the next iteration of a service. Temporary connection errors and connection-pool timeouts wait five seconds initially, increasing to at most 30 seconds, then try the next iteration. A connection pool is the small collection of database connections shared by the app. `wait_or_stop(stop, seconds)` lets shutdown interrupt that wait. `observe_task(task, health, stopping)` records an unexpected exit using only the task name and error class, never the private exception text. Unknown code errors remain failures rather than being repeatedly hidden. |
+| `app/services/application.py` | `background_health` holds small, temporary summaries of service activity. `worker()` uses the shared recovery loop. Its next iteration claims only queued jobs, so it does not automatically rerun a job interrupted during model work or an external action. Saved job and action records remain authoritative. |
+| `app/connectors/telegram/bot.py` | `poll()` retries temporary startup/network problems and database failures. It advances its in-memory Telegram position only after saving updates; receiving an update again reuses its saved ID. `handle()` and `show_progress()` use the shared loop. `process_one()` remembers a completed command while its conversation save is pending, so a failed final save retries the save without repeating that command. Final-message delivery keeps its existing pending/sending/uncertain records, so a connection failure after sending cannot cause an automatic second send. |
+| `app/main.py` | Observes all background tasks and includes their activity in `/health`. A retrying or stopped component returns HTTP 503 and `degraded`; active components return HTTP 200 and `ok`. The public response contains component statuses, without raw errors or credentials. |
+| `tests/test_background_recovery.py` | Simulates a failed queue read, lost confirmation after saving a Telegram update, a failed conversation save, an uncertain final-message save, and a temporary Telegram startup failure. Checks that work recovers, saved updates and commands are not duplicated, an uncertain message is not resent, shutdown interrupts the wait, and a dead task is visible without revealing private error text. Fake Telegram and model services keep these checks offline. |
+| `docs/SETUP.md`, `docs/VALIDATION.md` | Explain the component health values and record recovery checks separately from real account/model behavior. |
+
+**What this enables:** a temporary database connection problem no longer silently ends the loops that receive messages and pick up queued work. Health identifies a stopped component if a different error occurs. This does not automatically retry interrupted agent jobs or uncertain Gmail actions. Restarting retains their existing saved state and explicit-retry rules.
+
+**Checked:** all **511 tests passed**, including real local PostgreSQL/pgvector, browser, and OCR checks. After the restart, all four background components reported `running`, Telegram was connected, and the already-waiting owner message became a completed chat with a delivered final reply. Every saved inbox message was marked processed, the queue's previous unpaused setting was restored, and Gmail stayed connected. No extra diagnostic chat message or Gmail action was requested. The old service also reported a dropped database connection during shutdown; its original background-task exception had not been recorded.
+
+## Phase 47 — Friendly conversation and ordinary email drafts
+
+A request for a test email was incorrectly sent through company research and sales qualification. With no researched prospects, it finished with `no_matches` instead of writing the email. The new **direct draft** path handles an ordinary email to a known recipient. Requests to find new contacts retain the research workflow.
+
+As originally built in this phase, **“Write a short test email to friend@example.com with the subject Hello”** showed a **Create draft** confirmation before writing. **Phase 48 below removes that extra click for normal requests.** If a necessary address or purpose is missing, the conversation instructions tell it to ask one friendly question and use your earlier answers. A test email needs no company information or background questionnaire. After saving, the bot shows a preview and a Gmail Drafts link. You review, edit, and send the actual draft yourself.
+
+Telegram progress now uses only **Queued…**, **Researching…**, and **Typing…**, alongside Telegram's normal typing indicator. The temporary progress message is removed after work finishes. Ordinary replies omit timers, task IDs, internal step names, and configuration summaries. File citations show a filename and page; website citations keep their links. Detailed records remain in the dashboard.
+
+| New or changed file | Purpose and the main inputs and outputs |
+|---|---|
+| `app/domain/workflow.py` | Adds `draft_mode` to `WorkflowRequest` and `WorkflowState`. `direct` means write to selected recipients; `outreach` means find and qualify contacts. The default stays `outreach`, so existing requests and saved records remain readable. The field saves with the same run data and checkpoints; it needs no database-table migration. |
+| `app/agent/nodes/direct.py` | New `prepare_direct(state, runtime)` takes the owner's brief and recipients, loads supplied files, and prepares contact records and a writing approach without searching or inventing company facts. Existing writing nodes use the shared selected-contact list, but no qualification score is created. `direct_brief(state)` returns the exact goal and bounded supplied evidence for both writing and review, or `None` for research outreach. |
+| `app/agent/graph.py` | `build_full_graph()` chooses the direct-email preparation step or the existing research subgraph at the beginning. Both routes join the same relationship-memory, contact-check, writing, review, and action steps. Existing checkpointed research steps keep their names. |
+| `app/services/runs.py` | `validate_request(request)` requires recipients for direct drafts and checks the configured batch limit before any model work. Direct runs use supplied information rather than enabling search or email discovery. A missing address produces the plain question “Who should I address the email to?” |
+| `app/agent/nodes/writing.py`, `app/agent/nodes/review.py` | Pass the direct brief to the writer and reviewer while retaining bounded revisions, failure recording, versions, and existing model budgets. |
+| `app/agent/components/writer.py`, `app/agent/components/reviewer.py` | `write_draft(..., brief=None)` and `review_draft(..., brief=None)` accept an optional direct-email brief. Both receive the same request and evidence. Their output records and checks for matching contact IDs remain in place. |
+| `app/agent/prompts/conversation.py` | Guides warm, short replies, one necessary question at a time, and use of earlier answers. Explains when to propose a direct draft versus research outreach. A connected Gmail address can answer “email myself.” It asks for no invented identity or recipient and keeps technical identifiers out of ordinary replies. |
+| `app/agent/prompts/writer.py`, `app/agent/prompts/reviewer.py` | Tell writing and review to follow the direct brief. A test or thank-you email needs no sales pitch or researched company details. They retain checks against unsupported claims, and writing omits a made-up signature when the sender's real name is unknown. |
+| `app/agent/policy.py`, `app/agent/nodes/contact.py`, `app/agent/nodes/external.py` | `check_contact(..., cold_outreach=True)` keeps the existing default. An explicitly requested direct draft can be for a person with an active conversation or recent contact, because it is not new cold outreach. Opt-outs, pending/uncertain actions, duplicates, current-account checks, automated review, and the prohibition on agent sending still apply. |
+| `app/services/presentation.py` | New plain-language helpers. `source_summary(reference, label)` keeps website links and readable document page numbers without showing internal IDs. `draft_button(request)` chooses **Create draft** or **Create drafts**. `proposal_summary(request, limit)` explains what will be prepared and where it will be saved. `run_summary(state)` explains the real outcome, gives a bounded preview after confirmed Gmail draft creation, or describes a missing decision/failure without exposing internal state names. |
+| `app/services/conversation.py` | `execute()` supplies the connected address to interpretation and puts the new draft button on the saved proposal. `response()` validates direct choices, carries supplied evidence forward, and uses the short confirmation. Document citations keep their internal references in saved evidence while displaying their readable filename/page labels. Ordinary chat does not start drafting. |
+| `app/services/application.py` | Completion notifications use the readable outcome rather than a raw status code. `_notify(..., entries=None)` queues bounded replies with optional **Review drafts**, **Choose email addresses**, or **Try again** buttons. Retry buttons identify the failed attempt privately. Statistics count confirmed Gmail drafts and do not count direct recipients as commercially qualified prospects. |
+| `app/connectors/telegram/bot.py` | Handles the new readable decision and retry buttons. Repeated retry clicks reuse one queued attempt. Draft-review controls keep their recipient/version/content binding privately. The edit handler now updates the saved conversation itself, so the following subject and body messages are correctly remembered. |
+| `app/services/tasks.py` | Continuing a saved task says “I'll pick up where we left off” rather than listing graph-step names and IDs. A missing review or address choice is returned to Telegram as the appropriate button, without treating “continue” as approval. |
+| `app/services/progress.py`, `app/connectors/telegram/progress.py` | Execution events map to the three short labels. `TelegramProgress.tick()` updates one bubble only when its visible label changes, renews native typing, and removes the bubble on completion. Rate-limit waits, suppression after an uncertain initial send, and independence from final-message delivery remain. A failed cleanup cannot block the answer. |
+| `tests/test_direct_drafts.py` | Fifteen scenarios check real graph execution with fake models/Gmail: direct drafting without discovery, existing conversations, opt-outs, missing/oversized requests, budget/review failures, app-only review, duplicate recipients, saved continuation, friendly Telegram confirmation, duplicate clicks, missing-address questions, remembered edits, and one retry from repeated button clicks. No credentials or paid calls are required. |
+| `tests/test_conversation.py`, `tests/test_knowledge_storage.py`, `tests/test_task_continuation.py`, `tests/test_telegram_progress.py` | Update expectations for the readable buttons, short confirmations, continuation replies, filename citations, three labels, and completion cleanup. Saved-library citations keep their page number in the reply and their full reference in the model's evidence, while hiding the internal document ID. Existing checks still cover privacy, saved evidence, retries, responsiveness, and durable final delivery. |
+| `README.md`, `docs/SETUP.md`, `docs/API_GUIDE.md`, `docs/MODELS_AND_TOOLS.md` | Describe the working direct-draft path, a simple Telegram example, the optional API field, and the quieter status display. The dashboard's current New run form still starts research outreach; direct drafting is exposed through Telegram and the authenticated API. |
+| `docs/assets/workflow.mmd`, `docs/assets/workflow.svg`, `docs/VALIDATION.md` | The editable diagram and its rendered image now show both drafting paths joining the shared checks and Gmail draft saving. Validation separates offline workflow checks from actual account/model acceptance. |
+
+**Checked:** all **526 tests passed**, including real local PostgreSQL/pgvector, Chromium, and OCR checks. All four offline evaluation examples passed their existing scoring checks. The updated diagram was rendered and visually inspected. Direct workflow tests use two model calls for writing and review when no memory extraction or revisions are needed. The local service restarted successfully with Supabase, Telegram, and Gmail still connected, and the queue returned to its earlier setting. Actual provider wording and Gmail acceptance remain account checks; the tests use substitutes and do not create a real email.
+
+## Phase 48 — Start when asked, without an extra confirmation
+
+Saying **“Draft a test email to friend@example.com”** now starts preparation. You do not have to repeat the instruction by pressing a button. Clear research and file-reading requests already start directly and keep that behavior. Missing essential details still produce a short question.
+
+If you say **“Show me the plan first and wait for my approval,”** the assistant keeps the optional confirmation button. That decision concerns starting work, not sending an email. Creating a new requested Gmail draft remains allowed; sending stays manual in Gmail. The conversation cannot send messages or update an existing Gmail draft. Existing app review/edit controls retain their version and content checks.
+
+| Changed file | Purpose, inputs, and outputs |
+|---|---|
+| `app/domain/conversation.py` | `ConversationAction.require_confirmation` is a checked true/false value, defaulting to false. The model sets it to true when the owner's words explicitly request a pause before work. It adds no new tool permission. |
+| `app/agent/prompts/conversation.py` | Explains that a clear instruction authorizes preparation, how to honor an explicit request to wait, and when to ask about missing information. Research-only requests remain separate from drafting. Existing-email edits go through review controls; sending remains unavailable. |
+| `app/services/conversation.py` | `response()` validates the requested work and saves `start_requested`. `execute()` saves that result, asks the shared service to queue drafting, then replies without a start button. `_start_requested(turn_id, session_id)` returns an already queued job after an interruption, or calls `start_proposal()` for a new validated request. The same saved key prevents two runs from one message. Older saved proposals without the new flag keep waiting, so an upgrade does not silently start previously pending work. |
+| `app/services/presentation.py` | `start_summary(request, limit)` returns a short acknowledgment describing the requested draft preparation and destination. `proposal_summary()` and `draft_button()` remain for owners who explicitly request a plan before starting and for older saved proposals. Neither acknowledgment claims a draft has already been saved. |
+| `tests/test_direct_drafts.py` | The Telegram check now creates a draft from the owner's message without a button. Repeated delivery of the same update produces one queued run and one fake Gmail draft. A new restart check simulates losing confirmation just after saving that job, then rebuilds the service and retries after another chat message; it still creates only one draft and performs no send. |
+| `tests/test_conversation.py` | A request to wait still shows the confirmation and makes no Gmail call before approval. Repeated approval clicks start once. Changing the request invalidates the older waiting proposal. Existing research checks continue to use tools directly without creating emails. |
+| `README.md`, `docs/SETUP.md` | Explain immediate starts, the optional request to wait, and how to test a new draft without a confirmation click. The Gmail review and manual-send instructions remain. |
+| `docs/assets/workflow.mmd`, `docs/assets/workflow.svg` | The editable flowchart and image show a direct start after validation, with a separate wait path only when requested. |
+| `docs/VALIDATION.md` | Records the checks for this behavior and distinguishes fake-service tests from the owner's live Telegram/Gmail acceptance check. |
+
+**Checked:** all **527 tests passed**, including real local PostgreSQL/pgvector, browser, and OCR checks. The diagram was rendered and inspected. The local service restarted successfully, all four background components reported running, and the queue returned to its earlier unpaused setting. Telegram, Gmail, and the existing database remained connected. The tests verify execution with fake external services; a new ordinary request is the owner's live acceptance check.
+
+## Phase 49 — Reliable tools, complete emails, and approved Gmail edits
+
+A new request such as **“Find funded wearable startups”** now reaches current web research even when older messages discussed a test email. Search works without a Brave key: the application uses DuckDuckGo by default. Brave remains an optional alternative. The browser reads pages discovered by either search provider or supplied by you. Public search can be rate-limited; the bot reports failures instead of inventing results.
+
+The incomplete email bodies had a concrete cause: xAI treats a string pattern as matching the whole value. The former `\S` rule allowed exactly one non-space character. The corrected rule permits complete multiline emails. Additional checks reject single-character bodies, punctuation-only bodies, and obvious placeholders before review or Gmail creation. Writing and review prompts require the whole finished message.
+
+Existing Gmail drafts now have a separate edit path. The agent reads the actual message, writes and reviews a proposal, then waits. Approving changes updates **the same draft ID**; rejecting does not change Gmail. Recipients, attachments, reply headers, and thread stay with the draft. The app reads it again before updating and blocks an old preview if the account or draft changed. A lost write confirmation requires inspection rather than automatic repetition. Sending remains manual in Gmail.
+
+| Changed file | Purpose, main inputs, and outputs |
+|---|---|
+| `app/domain/schemas.py` | `EmailBody` accepts nonblank multiline text while preserving its formatting. Its pattern now works with both Pydantic and the provider's whole-string validation. |
+| `app/agent/context.py` | `ManagedModelClient.generate_structured(...)` validates email completeness before saving a model result for reuse. An earlier cached fragment is removed on explicit retry, without resetting spent usage. Failed content also produces a model-failure event. This prevents retries from repeatedly loading the same incomplete body. |
+| `app/agent/components/writer.py`, `reviewer.py` | `validate_email_content(draft)` rejects fragments and obvious placeholders. `write_draft(...)` validates the generated message; `review_draft(...)` checks it before asking the review model. These checks prevent a valid JSON record from being mistaken for a complete email. |
+| `app/agent/prompts/writer.py`, `reviewer.py` | Explain that writing must return the full email, and that review must check requested content and the whole revision. Existing source and accuracy rules still apply. |
+| `app/agent/conversation.py` | `understand()` keeps the initial instruction pass. Clear work requests also reach `decide()` even after an inappropriate early answer. `read_tool()` saves results; `answer()` handles an ordinary answer, new draft request, or proposed edit. Existing checkpoint step names stay compatible. |
+| `app/agent/prompts/conversation.py` | Gives the latest message priority and distinguishes research, new drafts, and editing a saved Gmail draft. It instructs the model to read the current draft first and never claim an edit is saved before approval and confirmation. |
+| `app/domain/conversation.py` | Adds checked `read_gmail_draft` and `edit_draft` actions and a `draft_id` field. They permit reading and proposing changes; they cannot approve, send, or execute arbitrary commands. |
+| `app/llm/tools.py` | `tool_definitions(inputs)` advertises only available reading tools. `function_history(inputs)` puts history, application evidence, the latest message, and matched native function-call/results into distinct entries. `research_request`, `work_request`, and `edit_request` recognize clear commands to protect against stale task selection. |
+| `app/llm/xai_client.py` | The initial conversation request uses these separate message entries. Other structured model tasks retain their normal inputs. |
+| `app/llm/xai_routing.py` | Keeps 4.3 for instructions/writing, 4.20 for reasoning/tools/review, and Multi-Agent for evidence analysis. A fresh research command requires search or its supplied page first; an edit requires reading Gmail first. Invalid or skipped required calls are rejected. |
+| `app/connectors/search.py` | `PublicSearchTool.search(query)` runs bounded DuckDuckGo discovery in a background thread, filters public URLs, removes duplicate results, and returns checked `SearchResult` records. `BraveSearchTool` retains the paid-key option. Neither adapter invents results after failure. |
+| `app/services/runtime.py`, `pyproject.toml`, `.env.example` | Runtime selects Brave when its key is present, otherwise the new keyless adapter. The `ddgs` package supplies search. No new credential is required; the template comment explains the default. |
+| `app/connectors/gmail/drafts.py` | New email-format helpers. `snapshot(response)` extracts the draft ID, sender, recipients, subject, body, attachment count, and original-content hash. A hash identifies content without exposing credentials. `updated_raw(original, draft)` replaces subject/body while retaining message headers and attachments, and updates the HTML alternative when present. HTML-only or oversized messages require editing in Gmail. |
+| `app/connectors/gmail/client.py` | `list_drafts(query, limit)` finds candidate drafts; `read_draft(id)` reads raw email; `update_draft(id, baseline_hash, draft)` rereads it, checks the baseline, and replaces content with Gmail's PUT operation at the same ID. Fake equivalents let tests check behavior offline. Creation also rejects incomplete bodies. |
+| `app/connectors/gmail/oauth.py` | Connected and account-bound adapters expose those reading/update methods with token renewal. The bound adapter checks account identity while holding the existing connector lock. Tokens never enter prompts, previews, or run state. Existing Gmail scopes suffice. |
+| `app/services/draft_edits.py` | New `DraftEdits` service. `read(selector, chat_id)` returns one saved snapshot or asks which matching draft you mean. `queue(...)` saves an edit job. `prepare(job)` writes/reviews a full revision and persists its preview. `decide(run_id, fingerprint, decision)` records approval/rejection and queues an approved update in one database transaction. `apply(job)` checks cancellation, account, recipients, and action history, then updates once. `retry(...)` refuses resolved or uncertain writes. `public`, `preview`, and `entries` supply dashboard content, Telegram text, and private approval buttons. |
+| `app/services/conversation.py` | Executes the read-draft tool and saves its observation. An `edit_draft` result must select a draft read in this turn. Execution queues one preparation job using a stable saved key; retries reuse it. Clear research or edit commands cannot become unrelated new outreach drafts. |
+| `app/services/application.py`, `tasks.py` | The shared worker executes preparation and approved-update jobs. The dashboard lists their runs and counts pending approvals. Stop, retry, cancellation, and continuation use saved records; saying “continue” cannot approve a pending edit. Updating an existing draft does not count as creating another one. |
+| `app/domain/workflow.py` | Adds the `updated` outcome for a confirmed existing-draft update. The result retains that draft's external ID and approved-content fingerprint. |
+| `app/connectors/telegram/bot.py` | Presents saved edit previews through review controls and handles **Approve changes** / **Reject changes**. Private button data identifies the exact version. Repeated approval clicks reuse the same update job. |
+| `app/web/routes/control.py`, `app/web/static/app.js` | Adds authenticated `POST /api/runs/{run_id}/gmail-edit` decisions and a before/after panel with shared approve/reject buttons. External content uses text nodes. Connections names the actual search provider. Owner login, request validation, and browser CSRF protection still apply. |
+| `tests/test_research_routing.py` | Checks latest-task priority through real model-request parsing, required reading calls, multiline email validation, fragments blocked before Gmail, and bounded keyless search with safe failures. All provider/model responses in these tests are simulated. |
+| `tests/test_gmail_draft_edits.py` | Checks reading, empty-body repair, preview before any update, restart persistence, same-ID replacement, native model-role selection, real local PostgreSQL restart/concurrent approvals, repeated decisions, rejection, stale fingerprints, account/manual-content changes, uncertain writes, cancellation, continuation without approval, ambiguous recipients, shared authenticated dashboard decisions, and preserved attachments/thread/recipients. |
+| `tests/test_model_routing.py`, `tests/test_conversation.py` | Updates the required first-tool expectation and makes the proposal-invalidation example explicitly request outreach emails. A research-only request must remain research. Existing role, native-call, and continuation checks stay in place. |
+| `README.md`, `docs/SETUP.md`, `docs/API_GUIDE.md`, `docs/MODELS_AND_TOOLS.md`, `docs/assets/workflow.mmd`, `docs/assets/workflow.svg`, `docs/VALIDATION.md` | Explain the working keyless search, model routing, full-email checks, and approved existing-draft path. The diagram shows editing separately from creating a new email. Validation records actual checks separately from live account acceptance. |
+
+The new snapshots, proposals, jobs, and action records use existing private database tables. This change needs no new Supabase keys, bucket, or database migration. Gmail never offers an atomic comparison between a browser edit and our replacement: the app checks immediately before its update, so avoid editing the same draft in Gmail while an approved update is underway.
+
+**Checked:** all **555 tests passed**, including real local PostgreSQL/pgvector, Chromium, and OCR checks. All four offline evaluation examples passed. A real browser signed in to an isolated dashboard, displayed original/proposed content, approved it, and verified one same-ID update through fake Gmail. The dashboard preview and revised diagram were visually inspected. Keyless discovery returned five live public results without a Brave key; this verifies discovery, not the truth of their funding claims. No paid model inference or real Gmail write was used for these checks. The local service restarted healthy with all four background components running, the queue restored, and Telegram, Gmail, and Supabase still connected. Connections confirmed DuckDuckGo and the requested model roles. Detailed results are recorded in `docs/VALIDATION.md`.
+
+
+## Phase 50 — Documentation layout (reverted)
+
+This layout shortened the guides, added three focused diagrams, and moved detailed explanations into separate history files. It removed too much guidance from the main pages. Phase 51 restores the written instructions and file explanations.
+
+## Phase 51 — Restore instructions and make diagrams optional
+
+The documentation again explains how to install, configure, run, and test the application. Full file explanations and phase records stay in this guide. Small formatting changes make instructions easier to follow without replacing them with pictures.
+
+| Files | What changed |
+|---|---|
+| `README.md` | Restores feature descriptions, demo instructions, file-use instructions, and checks. Adds five written workflow steps; the full diagram is optional to open. |
+| `docs/SETUP.md`, `docs/VALIDATION.md` | Restores complete setup, account, storage, testing, and recovery instructions, together with the original verification record. |
+| `docs/MODELS_AND_TOOLS.md` | Restores model/tool behavior, settings, continuation, saved search, and test explanations. Uses numbered tool-call steps and shorter paragraphs; the diagram is optional. |
+| `FILE_GUIDE.md` | Restores the complete reference and phase history. Adds section links and corrects the model-settings description. |
+| `docs/assets/workflow.mmd`, `workflow.svg` | Restores the original complete workflow. Removes the two extra diagrams and the separate reference files introduced in phase 50. |
+
+**Checked:** local links, heading anchors, code-block formatting, and rendered documentation. This changes documentation only; the 555 application tests were last run in phase 49.
