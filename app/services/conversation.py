@@ -4,6 +4,7 @@ The conversational model can propose outreach, but only the shared outreach
 service can start it. A proposal button never approves an email.
 """
 import json
+import asyncio
 import re
 import time
 from urllib.parse import urlsplit
@@ -23,11 +24,11 @@ from app.domain.workflow import Sender, WorkflowRequest, WorkflowState
 from app.llm.client import ModelProviderError, ModelResponseError, generate_structured
 from app.llm.tools import TOOL_FIELDS
 from app.domain.research import ResearchAnalysis
-from app.services.cancellation import RunCancelled, RunStopped, check_cancelled
+from app.services.cancellation import RunCancelled, RunStopped, acheck_cancelled as check_cancelled
 from app.services.limits import LimitExceeded
 from app.services.runs import ConfigurationError, RunConflict, RunNotFound
 from app.storage.control import JobRow, ValueRow
-from app.storage.events import trace
+from app.storage.events import atrace as trace
 
 
 class ConversationService:
@@ -57,6 +58,7 @@ class ConversationService:
         job = self.store.enqueue('chat', state.run_id, {'message': message.strip(), 'session_id': session_id},
                                  key, state=state, origin='telegram', run_kind='chat')
         self.service.tasks.remember(session_id, job['run_id'])
+        self.service.progress.queued(job)
         return job
 
     def retry_payload(self, run_id):
@@ -69,17 +71,19 @@ class ConversationService:
 
     async def execute(self, job):
         run_id, payload = job['run_id'], job['payload']
-        state = self.service.state(run_id).state
-        cached = self.store.get('chat:result:' + run_id)
+        state = (await asyncio.to_thread(self.service.state, run_id)).state
+        values = await asyncio.to_thread(self.store.get_many,
+            ['chat:result:' + run_id, 'chat:history:' + payload['session_id'], 'sender_profile'])
+        cached = values.get('chat:result:' + run_id)
         try:
-            check_cancelled(self.manager.repository, run_id)
+            await check_cancelled(self.manager.repository, run_id)
             if cached is None:
-                self.manager.repository.save_run(state, 'running')
+                await asyncio.to_thread(self.manager.repository.save_run, state, 'running')
                 snapshot = await self.graph.aget_state(self.config(run_id))
-                history = self.store.get('chat:history:' + payload['session_id'], {}).get('turns', [])
-                files = [self.service.documents.get(item.document_id) for item in state.attachments]
+                history = values.get('chat:history:' + payload['session_id'], {}).get('turns', [])
+                files = await asyncio.to_thread(lambda: [self.service.documents.get(item.document_id) for item in state.attachments])
                 gmail = self.manager.gmail
-                account = gmail.status() if gmail and hasattr(gmail, 'status') else {}
+                account = await asyncio.to_thread(gmail.status) if gmail and hasattr(gmail, 'status') else {}
                 inputs = {
                     'message': payload['message'],
                     'history': [{'user': turn['user'][:1500], 'assistant': turn['reply'][:2500]}
@@ -87,7 +91,7 @@ class ConversationService:
                     'previous_evidence': [item for turn in history[-2:] for item in turn.get('evidence', [])][-4:],
                     'attached_files': [{'document_id': f['id'], 'filename': f['filename'], 'status': f['status'],
                                         'purpose': reference.purpose} for f, reference in zip(files, state.attachments)],
-                    'sender_profile': self.store.get('sender_profile', {'name': 'User', 'context': ''}),
+                    'sender_profile': values.get('sender_profile', {'name': 'User', 'context': ''}),
                     'capabilities': {'search': self.manager.search is not None, 'browser': self.manager.browser is not None,
                                      'knowledge': self.manager.settings.semantic_search_enabled,
                                      'research': self.manager.settings.model_provider == 'xai' and self.manager.settings.xai_task_routing,
@@ -102,7 +106,7 @@ class ConversationService:
                     # A new greeting or changed profile cannot replace the
                     # task that was in progress when execution stopped.
                     inputs = snapshot.values.get('inputs', inputs)
-                    trace(self.manager.repository, run_id, 'chat_resume', next_steps=list(snapshot.next),
+                    await trace(self.manager.repository, run_id, 'chat_resume', next_steps=list(snapshot.next),
                           saved_tools=len(snapshot.values.get('observations', [])))
                 async with self.manager.client_factory() as client:
                     context = ConversationContext(self, run_id,
@@ -120,27 +124,28 @@ class ConversationService:
                 cached = {**output['result'], 'session_id': payload['session_id']}
                 # Save the answer before outbox delivery. An explicit retry after
                 # a crash here reuses it, without a second model or Gmail call.
-                self.store.put('chat:result:' + run_id, cached)
-                self.store.put('resume:' + run_id, {'next_steps': [], 'completed_tools': len(output.get('observations', []))})
-            check_cancelled(self.manager.repository, run_id)
-            self._remember(run_id, payload, cached)
+                await asyncio.to_thread(self.store.put_many, {
+                    'chat:result:' + run_id: cached,
+                    'resume:' + run_id: {'next_steps': [], 'completed_tools': len(output.get('observations', []))}})
+            await check_cancelled(self.manager.repository, run_id)
+            await asyncio.to_thread(self._remember, run_id, payload, cached)
             entries = []
             if cached.get('proposal'):
                 entries.append(('Start outreach', {'chat_proposal': run_id, 'conversation': payload['session_id']}))
             if cached.get('review_run_id'):
                 entries.append(('Review current drafts', {'review_run': cached['review_run_id']}))
-            queue_message(self.store, self.manager.settings.telegram_owner_id, 'chat:' + run_id, cached['text'], entries)
+            await asyncio.to_thread(queue_message, self.store, self.manager.settings.telegram_owner_id, 'chat:' + run_id, cached['text'], entries)
             state.current_step = 'completed'
-            self.manager.repository.save_run(state, 'completed')
+            await asyncio.to_thread(self.manager.repository.save_run, state, 'completed')
         except RunCancelled:
             state.current_step = 'cancelled'
-            self.manager.repository.save_run(state, 'cancelled')
+            await asyncio.to_thread(self.manager.repository.save_run, state, 'cancelled')
             return 'cancelled'
         except RunStopped:
             await self._save_progress(run_id)
             state.current_step = 'stopped'
-            self.manager.repository.save_run(state, 'stopped')
-            trace(self.manager.repository, run_id, 'run_stopped')
+            await asyncio.to_thread(self.manager.repository.save_run, state, 'stopped')
+            await trace(self.manager.repository, run_id, 'run_stopped')
             return 'stopped'
         except BaseException as error:
             # Cancellation and crashes keep budgets and inputs for explicit retry.
@@ -148,14 +153,14 @@ class ConversationService:
             state.current_step = 'failed'
             message = (error.public_message if isinstance(error, ModelProviderError)
                        else 'Conversation interrupted or unavailable. Retry this turn.')
-            self.manager.repository.save_run(state, 'failed', message)
+            await asyncio.to_thread(self.manager.repository.save_run, state, 'failed', message)
             raise
         return 'completed'
 
     async def _save_progress(self, run_id):
         """Keep a small readable pointer as well as LangGraph's full snapshot."""
         snapshot = await self.graph.aget_state(self.config(run_id))
-        self.store.put('resume:' + run_id, {'next_steps': list(snapshot.next),
+        await asyncio.to_thread(self.store.put, 'resume:' + run_id, {'next_steps': list(snapshot.next),
             'completed_tools': len(snapshot.values.get('observations', [])) if snapshot.values else 0})
 
     def _remember(self, run_id, payload, result):
@@ -192,14 +197,14 @@ class ConversationService:
         """Dispatch a checked read operation; external content cannot add tools."""
         from app.storage.repository import stable_id
         cache_key = 'chat:tool:' + stable_id(context.run_id, json.dumps(action.model_dump(), sort_keys=True))
-        cached = self.store.get(cache_key)
+        cached = await asyncio.to_thread(self.store.get, cache_key)
         if cached is not None:
-            trace(self.manager.repository, context.run_id, 'tool_cache_hit', tool=action.action, call_id=action.call_id)
+            await trace(self.manager.repository, context.run_id, 'tool_cache_hit', tool=action.action, call_id=action.call_id)
             return cached
         observation = {'tool': action.action, 'content': '', 'sources': []}
         started = time.monotonic()
         call_id = action.call_id or uuid4().hex
-        trace(self.manager.repository, context.run_id, 'tool_start', tool=action.action, call_id=call_id)
+        await trace(self.manager.repository, context.run_id, 'tool_start', tool=action.action, call_id=call_id)
         if action.call_id and action.action in TOOL_FIELDS:
             field = TOOL_FIELDS[action.action][0]
             observation['function_call'] = {'type': 'function_call', 'call_id': action.call_id,
@@ -262,7 +267,7 @@ class ConversationService:
             elif action.action == 'read_file':
                 if action.document_id not in {item['document_id'] for item in context.inputs['attached_files']}:
                     raise ToolError('Choose a file attached to this conversation.')
-                record = self.service.documents.get(action.document_id)
+                record = await asyncio.to_thread(self.service.documents.get, action.document_id)
                 if record['status'] != 'ready':
                     raise ToolError(f"File reading is {record['status']}. Use /files or retry a failed file before asking again.")
                 sections, remaining = [], 12000
@@ -311,15 +316,15 @@ class ConversationService:
             else:
                 observation['error'] = 'The read operation was unavailable, invalid, blocked, or reached its limit.'
         except BaseException as error:
-            trace(self.manager.repository, context.run_id, 'tool_failure', tool=action.action,
+            await trace(self.manager.repository, context.run_id, 'tool_failure', tool=action.action,
                   call_id=call_id, error_type=type(error).__name__, seconds=time.monotonic() - started)
             raise
-        trace(self.manager.repository, context.run_id, 'conversation_tool', tool=action.action, call_id=call_id,
+        await trace(self.manager.repository, context.run_id, 'conversation_tool', tool=action.action, call_id=call_id,
               succeeded='error' not in observation, seconds=time.monotonic() - started,
               source_count=len(observation['sources']))
         # Close the small window between completing a read and saving the next
         # graph checkpoint. Retrying that node can reuse its recorded result.
-        self.store.put(cache_key, observation)
+        await asyncio.to_thread(self.store.put, cache_key, observation)
         return observation
 
     def response(self, action, observations, context):

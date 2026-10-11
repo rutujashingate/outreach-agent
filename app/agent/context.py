@@ -13,11 +13,11 @@ from app.storage.control import ControlStore
 from app.llm.client import generate_structured
 from app.llm.client import ModelClient, ModelClientError, ModelProviderError, ModelResponseError
 from app.domain.workflow import MemoryFact, SearchResult
-from app.storage.events import trace
+from app.storage.events import atrace as trace
 from app.services.limits import Limits
 from app.connectors.gmail.client import GmailTool
 from app.connectors.search import SearchTool, ToolError
-from app.services.cancellation import check_cancelled
+from app.services.cancellation import acheck_cancelled as check_cancelled
 
 
 # A new review/revision is new work even when the resulting email is identical.
@@ -40,24 +40,24 @@ class ManagedModelClient:
 
     async def generate_structured(self, *, instructions, input_text, response_model):
         async with self.semaphore:
-            check_cancelled(self.repository, self.run_id)
+            await check_cancelled(self.repository, self.run_id)
             key = 'model:result:' + self.run_id + ':' + stable_id(
                 model_cache_scope.get(), response_model.__name__, instructions, input_text,
                 json.dumps(response_model.model_json_schema(), sort_keys=True))
-            saved = self.store.get(key)
+            saved = await asyncio.to_thread(self.store.get, key)
             if saved is not None:
-                trace(self.repository, self.run_id, 'model_cache_hit', task=response_model.__name__)
+                await trace(self.repository, self.run_id, 'model_cache_hit', task=response_model.__name__)
                 return response_model.model_validate(saved)
             if self.consecutive_failures >= 3:
                 raise ModelClientError("Model requests were stopped after repeated failures.")
             # Transport/server failures get one retry. Configuration failures,
             # rate limits, invalid output, and refusals need owner action or time.
             for attempt in range(2):
-                check_cancelled(self.repository, self.run_id)
-                self.repository.reserve_call(self.run_id, "model", self.limits)
+                await check_cancelled(self.repository, self.run_id)
+                await asyncio.to_thread(self.repository.reserve_call, self.run_id, "model", self.limits)
                 started = time.monotonic()
                 route = self.client.route_info(response_model) if hasattr(self.client, 'route_info') else {}
-                trace(self.repository, self.run_id, "model_start", task=response_model.__name__, attempt=attempt, **route)
+                await trace(self.repository, self.run_id, "model_start", task=response_model.__name__, attempt=attempt, **route)
                 try:
                     async with asyncio.timeout(self.limits.model_timeout):
                         result = await generate_structured(client=self.client,
@@ -66,9 +66,9 @@ class ManagedModelClient:
                     # A node may process several prospects before checkpointing.
                     # Retain each validated answer so a later stop does not
                     # repeat the already completed, paid calls in that node.
-                    self.store.put(key, result.model_dump(mode='json'))
+                    await asyncio.to_thread(self.store.put, key, result.model_dump(mode='json'))
                     self.consecutive_failures = 0
-                    trace(self.repository, self.run_id, "model_end", task=response_model.__name__,
+                    await trace(self.repository, self.run_id, "model_end", task=response_model.__name__,
                           seconds=time.monotonic() - started, usage=getattr(self.client, "last_usage", {}),
                           model=getattr(self.client, "model_name", None), role=route.get('role'))
                     return result
@@ -77,7 +77,7 @@ class ManagedModelClient:
                     details = ({"provider": error.provider, "reason": error.reason,
                                 "http_status": error.status_code, "message": error.public_message}
                                if isinstance(error, ModelProviderError) else {})
-                    trace(self.repository, self.run_id, "model_failure", task=response_model.__name__,
+                    await trace(self.repository, self.run_id, "model_failure", task=response_model.__name__,
                           error_type=type(error).__name__, seconds=time.monotonic() - started,
                           usage=getattr(self.client, 'last_usage', {}), **route, **details)
                     if (attempt or isinstance(error, (ModelResponseError, TimeoutError))
@@ -94,26 +94,26 @@ class ManagedSearchTool:
         self.tool, self.repository, self.run_id, self.limits = tool, repository, run_id, limits
 
     async def search(self, query: str) -> list[SearchResult]:
-        check_cancelled(self.repository, self.run_id)
+        await check_cancelled(self.repository, self.run_id)
         store = ControlStore(self.repository.engine)
         key = 'search:result:' + self.run_id + ':' + stable_id(query)
-        saved = store.get(key)
+        saved = await asyncio.to_thread(store.get, key)
         if saved is not None:
-            trace(self.repository, self.run_id, 'search_cache_hit')
+            await trace(self.repository, self.run_id, 'search_cache_hit')
             return [SearchResult.model_validate(item) for item in saved['results']]
         for attempt in range(2):
-            check_cancelled(self.repository, self.run_id)
-            self.repository.reserve_call(self.run_id, "search", self.limits)
+            await check_cancelled(self.repository, self.run_id)
+            await asyncio.to_thread(self.repository.reserve_call, self.run_id, "search", self.limits)
             started = time.monotonic()
-            trace(self.repository, self.run_id, "search_start", attempt=attempt)
+            await trace(self.repository, self.run_id, "search_start", attempt=attempt)
             try:
                 async with asyncio.timeout(self.limits.search_timeout):
                     results = await self.tool.search(query)
-                trace(self.repository, self.run_id, "search_end", count=len(results), seconds=time.monotonic() - started)
-                store.put(key, {'results': [item.model_dump(mode='json') for item in results[:self.limits.max_search_results]]})
+                await trace(self.repository, self.run_id, "search_end", count=len(results), seconds=time.monotonic() - started)
+                await asyncio.to_thread(store.put, key, {'results': [item.model_dump(mode='json') for item in results[:self.limits.max_search_results]]})
                 return results[:self.limits.max_search_results]
             except (ToolError, TimeoutError) as error:
-                trace(self.repository, self.run_id, "search_failure", error_type=type(error).__name__)
+                await trace(self.repository, self.run_id, "search_failure", error_type=type(error).__name__)
                 if attempt:
                     raise ToolError("Search exceeded its retry or time limit.") from error
                 await asyncio.sleep(0.05)

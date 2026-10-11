@@ -61,7 +61,9 @@ def create_app(*, settings=None, manager=None, background=True):
             if background:
                 tasks.append(asyncio.create_task(service.worker(), name='outreach-worker'))
                 if configured.telegram_token and not configured.demo:
-                    tasks += [asyncio.create_task(bot.poll(), name='telegram-poller'), asyncio.create_task(bot.handle(), name='telegram-handler')]
+                    tasks += [asyncio.create_task(bot.poll(), name='telegram-poller'),
+                              asyncio.create_task(bot.handle(), name='telegram-handler'),
+                              asyncio.create_task(bot.show_progress(), name='telegram-progress')]
             application.state.tasks = tasks
             try: yield
             finally:

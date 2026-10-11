@@ -1,5 +1,16 @@
 # Local validation
 
+## Telegram speed and task progress — October 10, 2026
+
+- Inspected the existing hosted records without exposing message contents: three recent chats took approximately **24, 30, and 42 seconds** from job creation to completion; their individual model steps took approximately **3, 3, and 5 seconds**. Code inspection found repeated synchronous cloud reads on the shared network loop, alongside unnecessary separate value/control queries.
+- **504 tests passed** with `RUN_POSTGRES_TESTS=1 RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/pytest -o addopts='' -o faulthandler_timeout=30 -q --tb=short`. This includes real local PostgreSQL/pgvector, Chromium, and OCR checks. New progress checks use fake Telegram/model services; no provider credentials are needed.
+- New checks cover one edited status message, fixed stage labels, typing renewal, elapsed-time updates, rate-limit waits, suppression after uncertain delivery, no private content in statuses, and a final answer surviving progress-delivery failure. Deliberately held-open database/model calls do not stop progress delivery. Twenty parallel database reservations still accept exactly ten calls at a ten-call budget, with the correct saved cost. Existing stop/continue and duplicate-draft protections passed.
+- A single local comparison injected **25 ms per SQL statement**, used a fake model and an in-memory LangGraph checkpointer, and compared the previous committed code with this change. SQL statements fell from **75 to 55**; worker time fell from **1.827 to 1.343 seconds**; the longest event-loop heartbeat gap fell from **0.568 to 0.015 seconds**. Both used one model call. This measures application overhead under artificial database latency; it is not a live Telegram or model speed guarantee and does not include hosted checkpoint/network latency.
+- Real Supabase atomic value writes, batched reads, and fresh stop-flag reads passed, and their temporary records were removed. Package dependencies, Python compilation, dashboard JavaScript syntax, Git whitespace, and updated documentation links passed.
+- The local service restarted with retained cloud data and queue settings. Health returned `ok`; Telegram and Gmail both reported connected, and the previously passed storage report remained present. Google app credentials and Gmail account authorization are explained separately in setup; Telegram and the dashboard share one connected account.
+
+No paid model generation, unsolicited Telegram test message, Gmail draft, or email was requested by these diagnostics. Test the visible statuses with your next ordinary Telegram message or supplied-page request. Research/model duration still depends on the requested work and external services. Progress messages are temporary display data; saved task state and final replies remain durable.
+
 ## Password rotation recheck — October 10, 2026
 
 - After the owner rotated the database password, a new direct PostgreSQL connection succeeded. Corrected URL encoding in the ignored local `.env`, then gracefully restarted the service so it used the new value. Existing cloud records and queued-work settings were preserved.

@@ -69,6 +69,21 @@ def job_dict(row):
     )}
 
 
+def set_value(session, key, value):
+    """Insert or replace one value in the caller's transaction, in one query."""
+    dialect = session.get_bind().dialect.name
+    if dialect in {'sqlite', 'postgresql'}:
+        if dialect == 'sqlite':
+            from sqlalchemy.dialects.sqlite import insert
+        else:
+            from sqlalchemy.dialects.postgresql import insert
+        statement = insert(ValueRow).values(key=key, value=value)
+        session.execute(statement.on_conflict_do_update(index_elements=[ValueRow.key],
+                                                        set_={'value': statement.excluded.value}))
+    else:
+        session.merge(ValueRow(key=key, value=value))
+
+
 class ControlStore:
     def __init__(self, engine):
         self.engine = engine
@@ -80,7 +95,25 @@ class ControlStore:
 
     def put(self, key, value):
         with Session(self.engine) as session, session.begin():
-            session.merge(ValueRow(key=key, value=value))
+            set_value(session, key, value)
+
+    def get_many(self, keys):
+        """Read related small values together instead of separate cloud trips."""
+        with Session(self.engine) as session:
+            return dict(session.execute(select(ValueRow.key, ValueRow.value).where(ValueRow.key.in_(keys))).all())
+
+    def put_many(self, values):
+        with Session(self.engine) as session, session.begin():
+            for key, value in values.items():
+                set_value(session, key, value)
+
+    def work_controls(self, run_id):
+        """Read cancellation and resumable-stop flags in one fresh query."""
+        cancelled = select(RunMeta.run_id).where(RunMeta.run_id == run_id, RunMeta.cancel_requested.is_(True)).exists()
+        stopped = select(ValueRow.value).where(ValueRow.key == 'stop:' + run_id).scalar_subquery()
+        with Session(self.engine) as session:
+            cancel, stop = session.execute(select(cancelled, stopped)).one()
+            return bool(cancel), bool((stop or {}).get('requested'))
 
     def delete(self, key):
         with Session(self.engine) as session, session.begin():
@@ -130,7 +163,7 @@ class ControlStore:
                     session.add(RunRow(id=run_id, payload=state.model_dump(mode="json"), status="queued"))
                     session.add(RunMeta(run_id=run_id, origin=origin, kind=run_kind))
                     if run_kind == 'chat':
-                        session.merge(ValueRow(key='chat:latest:' + payload['session_id'], value={'run_id': run_id}))
+                        set_value(session, 'chat:latest:' + payload['session_id'], {'run_id': run_id})
                 elif run_id:
                     active = session.scalar(select(JobRow.id).where(JobRow.run_id == run_id, JobRow.status.in_(["queued", "running"])))
                     if active:
@@ -145,9 +178,9 @@ class ControlStore:
             raise
 
     def claim(self):
-        if self.get("queue", {}).get("paused"): return None
         with Session(self.engine) as session, session.begin():
-            row = session.scalar(select(JobRow).where(JobRow.status == "queued").order_by(JobRow.created_at, JobRow.id).limit(1))
+            paused = select(ValueRow.key).where(ValueRow.key == 'queue', ValueRow.value['paused'].as_boolean().is_(True)).exists()
+            row = session.scalar(select(JobRow).where(JobRow.status == "queued", ~paused).order_by(JobRow.created_at, JobRow.id).limit(1))
             if row is None: return None
             result = session.execute(update(JobRow).where(JobRow.id == row.id, JobRow.status == "queued").values(status="running", updated_at=now()))
             if result.rowcount != 1: return None
@@ -183,7 +216,7 @@ class ControlStore:
                     if session.get(InboxRow, item["update_id"]) is None:
                         session.add(InboxRow(update_id=item["update_id"], payload=item))
             if updates:
-                session.merge(ValueRow(key="telegram_offset", value={"next": max(item["update_id"] for item in updates) + 1}))
+                set_value(session, "telegram_offset", {"next": max(item["update_id"] for item in updates) + 1})
 
     def next_update(self):
         with Session(self.engine) as session:
@@ -192,7 +225,7 @@ class ControlStore:
 
     def finish_update(self, update_id, conversation):
         with Session(self.engine) as session, session.begin():
-            session.merge(ValueRow(key="telegram_conversation", value=conversation))
+            set_value(session, "telegram_conversation", conversation)
             row = session.get(InboxRow, update_id)
             if row: row.done = True
 

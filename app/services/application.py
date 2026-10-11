@@ -34,6 +34,8 @@ class AgentService:
         self.conversations = ConversationService(self)
         self.stopping = asyncio.Event()
         self.worker_busy = False
+        from app.services.progress import ProgressTracker
+        self.progress = ProgressTracker()
 
     def start(self, request: WorkflowRequest, key: str, origin="dashboard"):
         existing = self.store.find_job(key)
@@ -54,7 +56,9 @@ class AgentService:
             if (request.sender.email or "").casefold() != account["email"].casefold():
                 raise RunConflict("The sender must match the connected Gmail account.")
         state = WorkflowState(run_id=uuid4().hex, **request.model_dump(), gmail_account_id=account.get("account_id"))
-        return self.store.enqueue("start", state.run_id, {}, key, state=state, origin=origin)
+        job = self.store.enqueue("start", state.run_id, {}, key, state=state, origin=origin)
+        self.progress.queued(job)
+        return job
 
     def state(self, run_id):
         return self.manager.get(run_id)
@@ -127,6 +131,7 @@ class AgentService:
         if row["status"] != "running":
             response.state.current_step = "cancelled"
             self.manager.repository.save_run(response.state, "cancelled")
+            self.progress.finish_waiting(run_id, 'cancelled')
         trace(self.manager.repository, run_id, "cancel_requested")
         return {"run_id": run_id, "status": "cancel_requested"}
 
@@ -183,16 +188,21 @@ class AgentService:
         return saved_step
 
     async def execute_one(self):
-        job = self.store.claim()
+        job = await asyncio.to_thread(self.store.claim)
         if job is None: return False
+        with self.progress.track(job):
+            return await self._execute_job(job)
+
+    async def _execute_job(self, job):
         self.worker_busy = True
+        status, step = 'failed', None
         try:
             run_id, kind = job["run_id"], job["kind"]
             if kind == 'chat':
                 status = await self.conversations.execute(job)
-                self.store.finish_job(job['id'], status)
+                await asyncio.to_thread(self.store.finish_job, job['id'], status)
                 if status == 'stopped':
-                    self._notify(job['id'], f'Task stopped and progress saved. Say continue or /continue {run_id}.')
+                    await asyncio.to_thread(self._notify, job['id'], f'Task stopped and progress saved. Say continue or /continue {run_id}.')
                 return True
             if kind == "start": result = await self.manager.execute_new(run_id)
             elif kind == "decisions": result = await self.manager.resume(run_id, ApprovalSubmission.model_validate(job["payload"]))
@@ -214,7 +224,8 @@ class AgentService:
                 result = None
             else: raise ValueError("Unknown job type.")
             status = result.state.current_step if result and result.state.current_step in {'cancelled', 'stopped'} else 'completed'
-            self.store.finish_job(job["id"], status)
+            step = result.state.current_step if result else None
+            await asyncio.to_thread(self.store.finish_job, job["id"], status)
             if kind == 'document':
                 message = f"File ready: {document['filename']} ({len(document['content']['pages'])} pages/sections). Ask me a question about it, or inspect the text in the dashboard."
             elif kind in {'knowledge', 'storage_validation'}:
@@ -228,17 +239,20 @@ class AgentService:
                         '\n'.join(f"To: {result.state.recipients[p].email} — {result.state.drafts[p].subject}" for p in drafted) +
                         "\n\nReview and edit them in Gmail → Drafts, then click Send yourself. Nothing has been sent."
                         f"\nhttps://mail.google.com/mail/#drafts\nRun: {run_id}")
-            self._notify(job["id"], message)
+            await asyncio.to_thread(self._notify, job["id"], message)
         except RunStopped:
+            status = 'stopped'
             state = self.state(job['run_id']).state
             state.current_step = 'stopped'
             self.manager.repository.save_run(state, 'stopped')
             self.store.finish_job(job['id'], 'stopped')
             self._notify(job['id'], f'Task stopped. Say continue or /continue {job["run_id"]}.')
         except asyncio.CancelledError:
+            status = 'interrupted'
             self.store.finish_job(job["id"], "interrupted", "Service stopped; inspect and retry.")
             raise
         except Exception as error:
+            status = 'failed'
             # Only our own fixed explanations are safe to display. Raw provider
             # errors can contain private prompts, identifiers, or credentials.
             if isinstance(error, ModelProviderError):
@@ -254,6 +268,7 @@ class AgentService:
                 self._notify(job["id"], f"Work {job['id']} failed ({type(error).__name__}). {explanation}\nRun: {job['run_id'] or job['kind']}.")
         finally:
             self.worker_busy = False
+            self.progress.finish(job['id'], status, step)
         return True
 
     def _notify(self, job_id, message):
@@ -264,7 +279,7 @@ class AgentService:
     async def worker(self):
         while not self.stopping.is_set():
             if not await self.execute_one():
-                try: await asyncio.wait_for(self.stopping.wait(), timeout=0.3)
+                try: await asyncio.wait_for(self.stopping.wait(), timeout=1)
                 except TimeoutError: pass
 
     def list_runs(self, *, page=1, limit=20):

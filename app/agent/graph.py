@@ -12,7 +12,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 
 from app.domain.workflow import WorkflowState
-from app.storage.events import trace
+from app.storage.events import atrace as trace
 from app.agent.context import WorkflowContext, model_cache_scope
 from app.agent.nodes.recipients import prepare_recipients, choose_recipients
 from app.agent.nodes.approval import human_approval, prepare_approval
@@ -35,28 +35,28 @@ def observed(name, function):
     """Record node timing and decisions while keeping business logic elsewhere."""
     async def node(state: WorkflowState, runtime: Runtime[WorkflowContext]) -> dict:
         context, started = runtime.context, time.monotonic()
-        from app.services.cancellation import check_cancelled
-        check_cancelled(context.repository, state.run_id)
-        trace(context.repository, state.run_id, "node_start", node=name)
+        from app.services.cancellation import acheck_cancelled as check_cancelled
+        await check_cancelled(context.repository, state.run_id)
+        await trace(context.repository, state.run_id, "node_start", node=name)
         scope = model_cache_scope.set(json.dumps([name, state.revision_counts, state.draft_versions], sort_keys=True))
         try:
             result = await function(state, runtime)
         except GraphInterrupt:
-            trace(context.repository, state.run_id, "interrupt", node=name)
+            await trace(context.repository, state.run_id, "interrupt", node=name)
             raise
         except Exception as error:
-            trace(context.repository, state.run_id, "node_failure", node=name, error_type=type(error).__name__)
+            await trace(context.repository, state.run_id, "node_failure", node=name, error_type=type(error).__name__)
             raise
         finally:
             model_cache_scope.reset(scope)
-        trace(context.repository, state.run_id, "node_end", node=name,
+        await trace(context.repository, state.run_id, "node_end", node=name,
               seconds=time.monotonic() - started, current_step=result.get("current_step"))
         if name in {"qualification", "contact_policy", "prepare_approval", "human_approval", "review"}:
             updated = state.model_copy(update=result)
             route = {"qualification": after_qualification, "contact_policy": after_contact_policy,
                      "prepare_approval": after_prepare_approval, "human_approval": after_human_approval,
                      "review": after_review}[name](updated)
-            trace(context.repository, state.run_id, "route", node=name, destination=route,
+            await trace(context.repository, state.run_id, "route", node=name, destination=route,
                   revisions=updated.revision_counts)
         return result
     return node

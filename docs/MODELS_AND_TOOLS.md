@@ -61,6 +61,8 @@ Completed model responses are cached using their exact task, input, schema, and 
 
 Task links, stop flags, and readable progress summaries use the database's service records. Supabase uses the same Postgres checkpoint adapter; otherwise storage stays local SQLite. The dashboard shows stop/continue controls, saved progress, and live storage validation. Storage checks make no Grok calls and do not replace quality evaluations of generated answers.
 
+Telegram also shows a temporary, updating stage message and a typing indicator while the worker runs. Model, tool, and workflow events select fixed labels such as thinking, reading, drafting, and reviewing. These messages contain no model reasoning or source contents. They do not approve drafts or control saved state. Their delivery runs separately from the worker and final replies; a failed progress update cannot repeat work. Database reads and event writes in the conversation/model path run in background threads so cloud latency does not freeze those indicators.
+
 ## Search saved knowledge
 
 When enabled, `search_saved(query)` is another validated read-only tool. It searches documents and browser-read pages saved in earlier conversations, using local text embeddings plus keyword ranking. Embeddings represent meaning as numbers; pgvector stores and compares them inside Supabase PostgreSQL. The default English model runs on the computer/server and needs no extra API key. Grok still interprets the question and writes the answer.

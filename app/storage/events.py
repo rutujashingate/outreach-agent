@@ -1,6 +1,7 @@
 """Store concise execution events without recording credentials or full prompts."""
 
 from uuid import uuid4
+import asyncio
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,12 +12,19 @@ from app.domain.workflow import utc_now
 
 
 def trace(repository: Repository, run_id: str, event: str, **details) -> None:
-    from app.storage.control import ValueRow
+    from app.storage.control import set_value
+    from app.services.progress import publish
+    publish(event, **details)
     with Session(repository.engine) as session, session.begin():
         session.add(TraceRow(id=uuid4().hex, run_id=run_id, timestamp=utc_now().isoformat(),
                              event=event, payload=details))
         if event == 'node_start':
-            session.merge(ValueRow(key='progress:' + run_id, value={'node': details['node']}))
+            set_value(session, 'progress:' + run_id, {'node': details['node']})
+
+
+async def atrace(repository: Repository, run_id: str, event: str, **details) -> None:
+    """Record an event without holding up the network/event loop."""
+    await asyncio.to_thread(trace, repository, run_id, event, **details)
 
 
 def events(repository: Repository, run_id: str) -> list[dict]:

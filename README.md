@@ -15,7 +15,7 @@ A conversational Telegram assistant for questions, file reading, public-web rese
 - Searches saved documents and website evidence across conversations by meaning and keywords, with local embeddings and cited passages. The dashboard exposes the library and live storage checks. [Supabase and search setup](docs/SUPABASE.md).
 - Routes instruction following to Grok 4.3, reasoning/tool selection to Grok 4.20, and evidence analysis to 4.20 Multi-Agent. [Models and tools](docs/MODELS_AND_TOOLS.md).
 - Qualifies prospects, checks relationship history and contact rules, and writes personalized drafts.
-- Shows drafts, evidence, progress, retries, and cancellation in Telegram and the dashboard. App-only drafts retain review controls.
+- Shows Telegram typing and an updating task status while thinking, reading, researching, or drafting. The dashboard provides evidence, progress, retries, and cancellation. App-only drafts retain review controls.
 - Saves progress across restarts. Say **stop** to pause a task and **continue** to resume it with retained evidence and usage limits.
 - Connects one Gmail account with encrypted, renewable credentials. The agent cannot send emails.
 - Tracks events, reported tokens, estimated budgets, confirmed Gmail actions, and on-demand reply checks.

@@ -256,12 +256,12 @@ def test_finished_model_answer_survives_failure_before_node_checkpoint(make_run_
     setup.manager.browser = browser
     service = AgentService(setup.manager)
     crashed = False
-    def fail_after_cache(repository, run_id, event, **kwargs):
+    async def fail_after_cache(repository, run_id, event, **kwargs):
         nonlocal crashed
         if event == 'model_end' and not crashed:
             crashed = True
             raise RuntimeError('Stopped before graph checkpoint')
-        original_trace(repository, run_id, event, **kwargs)
+        await original_trace(repository, run_id, event, **kwargs)
     monkeypatch.setattr('app.agent.context.trace', fail_after_cache)
     async def exercise():
         job = service.conversations.queue('Read https://example.com', 's', [], 'one')

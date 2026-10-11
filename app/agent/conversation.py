@@ -4,6 +4,7 @@ Unlike the outreach graph, this graph can finish with an ordinary answer.
 The service checkpoints every step. A stopped turn resumes with its original
 inputs, observations, and tool call IDs. Budgets survive that continuation.
 """
+import asyncio
 from dataclasses import dataclass
 import json
 from typing import Any, TypedDict
@@ -14,7 +15,7 @@ from langgraph.runtime import Runtime
 from app.agent.prompts.conversation import CONVERSATION_INSTRUCTIONS
 from app.domain.conversation import ConversationAction, ConversationInstruction
 from app.llm.client import generate_structured
-from app.services.cancellation import check_cancelled
+from app.services.cancellation import acheck_cancelled as check_cancelled
 from app.agent.context import model_cache_scope
 
 
@@ -40,8 +41,8 @@ class ConversationContext:
 
 async def decide(state: ConversationState, runtime: Runtime[ConversationContext]):
     context = runtime.context
-    check_cancelled(context.service.manager.repository, context.run_id)
-    used = context.service.manager.repository.run(context.run_id)['model_calls']
+    await check_cancelled(context.service.manager.repository, context.run_id)
+    used = (await asyncio.to_thread(context.service.manager.repository.run, context.run_id))['model_calls']
     tools_allowed = (used < context.limits.max_chat_model_calls - 1
                      and len(state['observations']) < context.limits.max_chat_tool_calls)
     inputs = {**context.inputs, 'capabilities': {**context.inputs['capabilities']}}
@@ -69,7 +70,7 @@ async def understand(state: ConversationState, runtime: Runtime[ConversationCont
     context = runtime.context
     if not context.client.supports_task_routing:
         return {}  # Other providers retain the tested single-model loop.
-    check_cancelled(context.service.manager.repository, context.run_id)
+    await check_cancelled(context.service.manager.repository, context.run_id)
     action = await generate_structured(client=context.client, response_model=ConversationInstruction,
         instructions=CONVERSATION_INSTRUCTIONS + '\nThis is the instruction-following pass. Answer simple requests directly. For tasks requiring evidence, suggest the first reading step; a reasoner will select and execute the tools.',
         input_text=json.dumps({**context.inputs, 'observations': [], 'tools_allowed': True}, ensure_ascii=False))
@@ -79,32 +80,32 @@ async def understand(state: ConversationState, runtime: Runtime[ConversationCont
 
 async def read_tool(state: ConversationState, runtime: Runtime[ConversationContext]):
     context = runtime.context
-    check_cancelled(context.service.manager.repository, context.run_id)
+    await check_cancelled(context.service.manager.repository, context.run_id)
     observation = await context.service.read_tool(ConversationAction.model_validate(state['action']), context, state['observations'])
     return {'observations': [*state['observations'], observation]}
 
 
 async def answer(state: ConversationState, runtime: Runtime[ConversationContext]):
     context = runtime.context
-    check_cancelled(context.service.manager.repository, context.run_id)
-    result = context.service.response(ConversationAction.model_validate(state['action']), state['observations'], context)
+    await check_cancelled(context.service.manager.repository, context.run_id)
+    result = await asyncio.to_thread(context.service.response, ConversationAction.model_validate(state['action']), state['observations'], context)
     return {'result': result}
 
 
 def build_conversation_graph(checkpointer):
-    from app.storage.events import trace
+    from app.storage.events import atrace as trace
 
     def observed(name, function):
         async def node(state, runtime):
             context = runtime.context
-            check_cancelled(context.service.manager.repository, context.run_id)
-            trace(context.service.manager.repository, context.run_id, 'node_start', node='chat_' + name)
+            await check_cancelled(context.service.manager.repository, context.run_id)
+            await trace(context.service.manager.repository, context.run_id, 'node_start', node='chat_' + name)
             scope = model_cache_scope.set(f"chat:{name}:{state.get('steps', 0)}")
             try:
                 result = await function(state, runtime)
             finally:
                 model_cache_scope.reset(scope)
-            trace(context.service.manager.repository, context.run_id, 'node_end', node='chat_' + name)
+            await trace(context.service.manager.repository, context.run_id, 'node_end', node='chat_' + name)
             return result
         return node
 

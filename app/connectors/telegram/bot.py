@@ -22,6 +22,8 @@ class TelegramBot:
         self.owner = service.manager.settings.telegram_owner_id
         self.stop = asyncio.Event()
         self.sequence, self.message_key = 0, ''
+        from app.connectors.telegram.progress import TelegramProgress
+        self.progress = TelegramProgress(service.progress, client, self.owner)
 
     def say(self, text, entries=None):
         self.sequence += 1
@@ -81,58 +83,19 @@ class TelegramBot:
                  [('Skip prospect', {'recipient': None, 'run_id': state.run_id, 'prospect_id': pid})])
 
     async def process_one(self):
-        item = self.store.next_update()
+        item = await asyncio.to_thread(self.store.next_update)
         if item is None: return False
         self.sequence, self.message_key = 0, str(item['update_id'])
-        conversation = dict(self.store.get('telegram_conversation', {}))
+        conversation = dict(await asyncio.to_thread(self.store.get, 'telegram_conversation', {}))
         try:
             callback = item.get('callback_query')
             if callback:
                 try: await self.client.call('answerCallbackQuery', callback_query_id=callback['id'])
                 except ToolError: pass
-                value = self.store.get('button:' + callback.get('data', ''))
+                value = await asyncio.to_thread(self.store.get, 'button:' + callback.get('data', ''))
                 if not value or value['owner'] != self.owner or value['expires'] < time.time():
                     raise RunConflict('This button expired. Request a new review.')
-                if 'chat_proposal' in value:
-                    if conversation.get('id') != value['conversation']:
-                        raise RunConflict('This proposal belongs to an earlier conversation. Ask for a new one.')
-                    job = self.service.conversations.start_proposal(value['chat_proposal'], value['conversation'])
-                    self.say(f"Outreach started: {job['run_id']}. You can keep talking while it runs. I will notify you when a decision is needed.")
-                elif 'review_run' in value:
-                    self._review(value['review_run'])
-                elif 'decision' in value:
-                    decision = {k: value[k] for k in ('prospect_id', 'version', 'fingerprint')}
-                    if value['decision'] == 'edit':
-                        # Check freshness now and again when the edit is submitted.
-                        state = self.service.state(value['run_id']).state
-                        if not any(r.fingerprint == value['fingerprint'] and r.version == value['version'] for r in state.approval_requests):
-                            raise RunConflict('This draft is no longer current.')
-                        conversation = {'stage': 'edit_subject', 'run_id': value['run_id'], 'decision': decision}
-                        self.say('Type the replacement subject.')
-                    else:
-                        self.service.stage_decision(value['run_id'], ApprovalDecision(**decision, action=value['decision']))
-                        self.say('Choice saved. Submit decisions when every draft has a choice.')
-                elif 'submit' in value:
-                    job = self.service.submit_choices(value['submit'], f'tg:{item["update_id"]}:submit')
-                    self.say(f'Decisions submitted. Job {job["id"]}.')
-                elif 'later' in value: self.say('The run remains paused. Use /review when ready.')
-                elif 'recipient' in value:
-                    if conversation.get('stage') != 'recipient' or any(conversation.get(k) != value[k] for k in ('run_id','prospect_id')):
-                        raise RunConflict('Request current recipient choices again.')
-                    conversation['selections'][value['prospect_id']] = value['recipient']
-                    self._next_recipient(conversation)
-                elif 'document_purpose' in value:
-                    if value.get('conversation') != conversation.get('id'):
-                        raise RunConflict('This run has already started or the conversation changed.')
-                    attachment = next((item for item in conversation.get('request', {}).get('attachments', [])
-                                       if item['document_id'] == value['document_id']), None)
-                    if attachment is None: raise RunConflict('This file is no longer attached.')
-                    attachment['purpose'] = value['document_purpose']
-                    self.say('File purpose changed to ' + attachment['purpose'] + '. Continue the current question.')
-                elif 'wizard' in value:
-                    if value.get('conversation') != conversation.get('id'):
-                        raise RunConflict('This conversation has changed. Use its latest buttons.')
-                    self._wizard(conversation, value['wizard'])
+                await asyncio.to_thread(self._callback, value, conversation)
             else:
                 message = item.get('message', {})
                 text = message.get('text', '').strip()
@@ -143,18 +106,60 @@ class TelegramBot:
                 elif await self._task_command(text, conversation):
                     pass
                 elif text.startswith('/'):
-                    self._command(text, conversation)
+                    await asyncio.to_thread(self._command, text, conversation)
                 else:
-                    self._text(text, conversation)
+                    await asyncio.to_thread(self._text, text, conversation)
         except (ValueError, RunConflict, RunNotFound, ConfigurationError, ToolError) as error:
             # Only local validation/tool messages reach the owner, never raw
             # provider HTTP exceptions, credentials, or full validation inputs.
             message = str(error) if isinstance(error, (RunConflict, RunNotFound, ConfigurationError, ToolError)) else 'Invalid input. Check the requested format and try again.'
-            self.say(message[:1000])
+            await asyncio.to_thread(self.say, message[:1000])
         except Exception:
-            self.say('That request could not be processed. Check the dashboard and try again.')
-        self.store.finish_update(item['update_id'], conversation)
+            await asyncio.to_thread(self.say, 'That request could not be processed. Check the dashboard and try again.')
+        await asyncio.to_thread(self.store.finish_update, item['update_id'], conversation)
         return True
+
+    def _callback(self, value, conversation):
+        if 'chat_proposal' in value:
+            if conversation.get('id') != value['conversation']:
+                raise RunConflict('This proposal belongs to an earlier conversation. Ask for a new one.')
+            job = self.service.conversations.start_proposal(value['chat_proposal'], value['conversation'])
+            self.say(f"Outreach started: {job['run_id']}. You can keep talking while it runs. I will notify you when a decision is needed.")
+        elif 'review_run' in value:
+            self._review(value['review_run'])
+        elif 'decision' in value:
+            decision = {k: value[k] for k in ('prospect_id', 'version', 'fingerprint')}
+            if value['decision'] == 'edit':
+                # Check freshness now and again when the edit is submitted.
+                state = self.service.state(value['run_id']).state
+                if not any(r.fingerprint == value['fingerprint'] and r.version == value['version'] for r in state.approval_requests):
+                    raise RunConflict('This draft is no longer current.')
+                conversation = {'stage': 'edit_subject', 'run_id': value['run_id'], 'decision': decision}
+                self.say('Type the replacement subject.')
+            else:
+                self.service.stage_decision(value['run_id'], ApprovalDecision(**decision, action=value['decision']))
+                self.say('Choice saved. Submit decisions when every draft has a choice.')
+        elif 'submit' in value:
+            job = self.service.submit_choices(value['submit'], f'tg:{self.message_key}:submit')
+            self.say(f'Decisions submitted. Job {job["id"]}.')
+        elif 'later' in value: self.say('The run remains paused. Use /review when ready.')
+        elif 'recipient' in value:
+            if conversation.get('stage') != 'recipient' or any(conversation.get(k) != value[k] for k in ('run_id','prospect_id')):
+                raise RunConflict('Request current recipient choices again.')
+            conversation['selections'][value['prospect_id']] = value['recipient']
+            self._next_recipient(conversation)
+        elif 'document_purpose' in value:
+            if value.get('conversation') != conversation.get('id'):
+                raise RunConflict('This run has already started or the conversation changed.')
+            attachment = next((item for item in conversation.get('request', {}).get('attachments', [])
+                               if item['document_id'] == value['document_id']), None)
+            if attachment is None: raise RunConflict('This file is no longer attached.')
+            attachment['purpose'] = value['document_purpose']
+            self.say('File purpose changed to ' + attachment['purpose'] + '. Continue the current question.')
+        elif 'wizard' in value:
+            if value.get('conversation') != conversation.get('id'):
+                raise RunConflict('This conversation has changed. Use its latest buttons.')
+            self._wizard(conversation, value['wizard'])
 
     async def _task_command(self, text, conversation):
         """Common stop/continue phrases act on saved work without a model call."""
@@ -199,6 +204,7 @@ class TelegramBot:
         async with asyncio.timeout(35):
             data = await self.client.download_file(item['file_id'], MAX_FILE_BYTES)
         saved = await self.service.documents.save_async(filename, data)
+        self.service.progress.queued(saved['job'])
         caption = message.get('caption', '').strip()
         purpose = 'background' if caption.lower() == 'background' or conversation.get('stage') == 'background' else 'research'
         reference = {'document_id': saved['document']['id'], 'purpose': purpose}
@@ -272,9 +278,10 @@ class TelegramBot:
         stage = conversation.get('stage')
         if conversation.get('mode') != 'guided' and stage not in {'edit_subject', 'edit_body', 'recipient'}:
             self._chat_conversation(conversation)
-            self.service.conversations.queue(text, conversation['id'], conversation.get('request', {}).get('attachments', []),
+            job = self.service.conversations.queue(text, conversation['id'], conversation.get('request', {}).get('attachments', []),
                                              f'tg:{self.message_key}:chat')
             if self.store.get('queue', {}).get('paused'):
+                self.service.progress.queued(job, paused=True)
                 self.say('Your message is saved. Resume the queue in the dashboard when you want me to work on it.')
             return
         if not stage:
@@ -356,7 +363,7 @@ class TelegramBot:
             conversation.update(mode='chat', stage='chat', id=session_id, request={'attachments': attachments})
         else: raise RunConflict('This conversation has advanced. Use the latest buttons.')
 
-    async def deliver_one(self):
+    def _claim_delivery(self):
         with Session(self.store.engine) as session, session.begin():
             row = session.scalar(select(OutboxRow).where(OutboxRow.status == 'pending').order_by(OutboxRow.created_at, OutboxRow.key).limit(1))
             if row is None or row.retry_at > time.time(): return False
@@ -367,13 +374,23 @@ class TelegramBot:
                 if any(s.payload.get('_group') == group and s.status in {'uncertain', 'blocked'} for s in siblings):
                     row.status = 'blocked'; return True
             row.status = 'sending'
+            return key, payload
+
+    def _finish_delivery(self, key, status, delay):
+        with Session(self.store.engine) as session, session.begin():
+            session.execute(update(OutboxRow).where(OutboxRow.key == key).values(status=status, retry_at=time.time()+delay))
+        if status == 'uncertain': self.store.put('telegram_status', {'health': 'delivery_uncertain', 'checked_at': now()})
+
+    async def deliver_one(self):
+        claimed = await asyncio.to_thread(self._claim_delivery)
+        if claimed is False: return False
+        if claimed is True: return True  # An uncertain preceding part blocked this part.
+        key, payload = claimed
         status, delay = 'done', 0
         try: await self.client.call('sendMessage', **payload)
         except RateLimited as error: status, delay = 'pending', error.delay
         except ToolError: status = 'uncertain'
-        with Session(self.store.engine) as session, session.begin():
-            session.execute(update(OutboxRow).where(OutboxRow.key == key).values(status=status, retry_at=time.time()+delay))
-        if status == 'uncertain': self.store.put('telegram_status', {'health': 'delivery_uncertain', 'checked_at': now()})
+        await asyncio.to_thread(self._finish_delivery, key, status, delay)
         return True
 
     async def poll(self):
@@ -381,17 +398,20 @@ class TelegramBot:
             webhook = await self.client.call('getWebhookInfo')
             if webhook.get('url'): raise ToolError('Remove the existing Telegram webhook before using long polling.')
             identity = await self.client.call('getMe')
-            self.store.put('telegram_status', {'health': 'connected', 'username': identity.get('username'), 'checked_at': now()})
+            await asyncio.to_thread(self.store.put, 'telegram_status', {'health': 'connected', 'username': identity.get('username'), 'checked_at': now()})
         except ToolError:
-            self.store.put('telegram_status', {'health': 'configuration_error', 'checked_at': now()}); return
+            await asyncio.to_thread(self.store.put, 'telegram_status', {'health': 'configuration_error', 'checked_at': now()}); return
+        offset = (await asyncio.to_thread(self.store.get, 'telegram_offset', {})).get('next', 0)
         while not self.stop.is_set():
             try:
-                updates = await self.client.call('getUpdates', offset=self.store.get('telegram_offset', {}).get('next', 0),
+                updates = await self.client.call('getUpdates', offset=offset,
                     timeout=25, allowed_updates=['message','callback_query'])
-                self.store.accept_updates(updates, self.owner)
-                self.store.put('telegram_status', {'health': 'connected', 'username': identity.get('username'), 'checked_at': now()})
+                if updates:
+                    await asyncio.to_thread(self.store.accept_updates, updates, self.owner)
+                    offset = max(item['update_id'] for item in updates) + 1
+                await asyncio.to_thread(self.store.put, 'telegram_status', {'health': 'connected', 'username': identity.get('username'), 'checked_at': now()})
             except ToolError as error:
-                self.store.put('telegram_status', {'health': 'connection_error', 'checked_at': now()})
+                await asyncio.to_thread(self.store.put, 'telegram_status', {'health': 'connection_error', 'checked_at': now()})
                 try: await asyncio.wait_for(self.stop.wait(), timeout=error.delay if isinstance(error, RateLimited) else 5)
                 except TimeoutError: pass
 
@@ -400,5 +420,11 @@ class TelegramBot:
             processed = await self.process_one()
             delivered = await self.deliver_one()
             if not processed and not delivered:
-                try: await asyncio.wait_for(self.stop.wait(), timeout=0.3)
+                try: await asyncio.wait_for(self.stop.wait(), timeout=1)
                 except TimeoutError: pass
+
+    async def show_progress(self):
+        while not self.stop.is_set():
+            await self.progress.tick()
+            try: await asyncio.wait_for(self.stop.wait(), timeout=0.5)
+            except TimeoutError: pass

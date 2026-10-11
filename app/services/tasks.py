@@ -73,6 +73,7 @@ class TaskControls:
             state = self.service.state(run_id).state
             state.current_step = 'stopped'
             self.service.manager.repository.save_run(state, 'stopped')
+            self.service.progress.finish_waiting(run_id, 'stopped')
         trace(self.service.manager.repository, run_id, 'stop_requested')
         return {'run_id': run_id, 'status': 'stop_requested',
                 'message': 'Stop requested. The current call can finish saving its result. Say continue to resume this task.'}
