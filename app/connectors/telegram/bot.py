@@ -198,7 +198,7 @@ class TelegramBot:
         filename = item.get('file_name') or 'telegram-photo.jpg'
         async with asyncio.timeout(35):
             data = await self.client.download_file(item['file_id'], MAX_FILE_BYTES)
-        saved = self.service.documents.save(filename, data)
+        saved = await self.service.documents.save_async(filename, data)
         caption = message.get('caption', '').strip()
         purpose = 'background' if caption.lower() == 'background' or conversation.get('stage') == 'background' else 'research'
         reference = {'document_id': saved['document']['id'], 'purpose': purpose}

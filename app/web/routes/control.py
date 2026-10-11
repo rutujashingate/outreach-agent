@@ -5,7 +5,7 @@ import os
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.services.auth import require_owner
 from app.domain.workflow import ApprovalDecision, ApprovalSubmission, WorkflowRequest, Recipient, Sender
@@ -45,7 +45,10 @@ def connections(request):
     gmail = manager.gmail.status() if manager.gmail and hasattr(manager.gmail, 'status') else {'connected': False}
     return {'gmail': gmail, 'telegram': service(request).store.get('telegram_status', {'health': 'disabled'}),
             'storage': {'database': 'supabase' if settings.supabase_database_url else manager.repository.engine.dialect.name,
-                        'checkpoints': settings.checkpoint_backend, 'schema': 'outreach' if settings.supabase_database_url else None},
+                        'checkpoints': settings.checkpoint_backend, 'schema': 'outreach' if settings.supabase_database_url else None,
+                        'files': service(request).documents.files.backend,
+                        'validation': service(request).store.get('storage:validation')},
+            'knowledge': service(request).knowledge.status(),
             'browser': {'available': manager.browser is not None}, 'search': {'configured': manager.search is not None},
             'documents': service(request).documents.status(),
             'model': {'provider': settings.model_provider, 'configured': settings.demo or bool(os.getenv(model_key, '').strip())}, 'demo': settings.demo,
@@ -183,7 +186,7 @@ async def upload_document(request: Request, filename: str = Query(min_length=1, 
                 data.extend(chunk)
     except TimeoutError:
         raise HTTPException(408, 'The upload took too long. Try again.') from None
-    return service(request).documents.save(filename, bytes(data))
+    return await service(request).documents.save_async(filename, bytes(data))
 
 
 @router.get('/documents')
@@ -198,6 +201,51 @@ async def documents(request: Request, page: int = Query(1, ge=1), ids: str = Que
 @router.get('/documents/{document_id}')
 async def document_details(request: Request, document_id: str):
     return service(request).documents.get(document_id)
+
+
+@router.get('/documents/{document_id}/original')
+async def document_original(request: Request, document_id: str):
+    from urllib.parse import quote
+    from fastapi.responses import Response
+    data = await service(request).documents.original(document_id)
+    filename = service(request).documents.get(document_id)['filename']
+    return Response(data, media_type='application/octet-stream', headers={
+        'Content-Disposition': "attachment; filename*=UTF-8''" + quote(filename, safe='')})
+
+
+class KnowledgeQuery(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    query: str = Field(min_length=1, max_length=1000)
+
+    @field_validator('query', mode='before')
+    @classmethod
+    def trim_query(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+@router.get('/knowledge/sources')
+async def knowledge_sources(request: Request, page: int = Query(1, ge=1)):
+    return service(request).knowledge.sources(page)
+
+
+@router.post('/knowledge/search')
+async def knowledge_search(request: Request, body: KnowledgeQuery):
+    return await service(request).knowledge.search(body.query)
+
+
+@router.post('/knowledge/sources/{source_id}/reindex', status_code=202)
+async def reindex_source(request: Request, source_id: str, idempotency_key: Annotated[str | None, Header()] = None):
+    return service(request).knowledge.reindex(source_id, request_key(idempotency_key))
+
+
+@router.post('/storage/validate', status_code=202)
+async def storage_validate(request: Request, idempotency_key: Annotated[str | None, Header()] = None):
+    key = request_key(idempotency_key)
+    previous = service(request).store.find_job(key)
+    if previous: return previous
+    job = service(request).store.enqueue('storage_validation', None, {}, key)
+    service(request).store.put('storage:validation', {'status': 'queued', 'job_id': job['id'], 'checks': []})
+    return job
 
 
 @router.post('/documents/{document_id}/retry', status_code=202)

@@ -13,6 +13,7 @@ from app.llm.client import ModelResponseError
 
 TOOL_FIELDS = {
     'search': ('query', 1000, 'Find public websites using Brave search.'),
+    'search_saved': ('query', 1000, 'Find relevant passages in the owner\'s saved documents and website evidence, including earlier conversations. Results include dates and sources; they may be historical.'),
     'read_page': ('url', 2048, 'Read an allowed public URL from the user or search results.'),
     'read_file': ('document_id', 32, 'Read extracted text from an attached file.'),
     'run_status': ('run_id', 64, 'Read outreach progress. Use an empty ID for the latest run.'),
@@ -27,6 +28,7 @@ def tool_definitions(inputs):
     capabilities = inputs.get('capabilities', {})
     enabled = {'run_status'}
     if capabilities.get('search'): enabled.add('search')
+    if capabilities.get('knowledge'): enabled.add('search_saved')
     if capabilities.get('browser'): enabled.add('read_page')
     if inputs.get('attached_files'): enabled.add('read_file')
     if capabilities.get('research') and (inputs.get('observations') or inputs.get('previous_evidence')):

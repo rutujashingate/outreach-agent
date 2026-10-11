@@ -17,6 +17,10 @@ class Settings(BaseModel):
     xai_task_routing: bool = True
     data_dir: Path = Path(".data")
     supabase_database_url: str | None = Field(default=None, repr=False, exclude=True)
+    supabase_url: str = Field(default='', repr=False, exclude=True)
+    supabase_secret_key: str = Field(default='', repr=False, exclude=True)
+    document_storage: Literal['local', 'supabase'] = 'local'
+    semantic_search_enabled: bool = False
     database_url: str | None = Field(default=None, repr=False, exclude=True)
     checkpoint_backend: Literal["memory", "sqlite", "postgres"] = "sqlite"
     checkpoint_postgres_url: str | None = Field(default=None, repr=False, exclude=True)
@@ -45,6 +49,14 @@ class Settings(BaseModel):
                 raise ValueError('With Supabase, leave OUTREACH_DATABASE_URL and OUTREACH_CHECKPOINT_POSTGRES_URL empty; one URL stores both kinds of state.')
             self.database_url, self.checkpoint_postgres_url = database, checkpoint
             self.checkpoint_backend = 'postgres'
+        if self.document_storage == 'supabase':
+            from urllib.parse import urlsplit
+            url = urlsplit(self.supabase_url)
+            if (not self.supabase_database_url or not self.supabase_secret_key.strip()
+                    or url.scheme != 'https' or not (url.hostname or '').endswith('.supabase.co')
+                    or url.username or url.password or url.port or url.path not in {'', '/'}
+                    or url.query or url.fragment):
+                raise ValueError('Supabase files require the database URL, HTTPS project URL, and server secret key.')
         return self
 
     @classmethod
@@ -54,6 +66,10 @@ class Settings(BaseModel):
             xai_task_routing=os.getenv('XAI_TASK_ROUTING', 'true').lower() == 'true',
             data_dir=Path(os.getenv("OUTREACH_DATA_DIR", ".data")),
             supabase_database_url=os.getenv("OUTREACH_SUPABASE_DATABASE_URL") or None,
+            supabase_url=os.getenv('OUTREACH_SUPABASE_URL', '').rstrip('/'),
+            supabase_secret_key=os.getenv('OUTREACH_SUPABASE_SECRET_KEY', ''),
+            document_storage=os.getenv('OUTREACH_DOCUMENT_STORAGE', 'local'),
+            semantic_search_enabled=os.getenv('OUTREACH_SEMANTIC_SEARCH_ENABLED', 'false').lower() == 'true',
             database_url=os.getenv("OUTREACH_DATABASE_URL") or None,
             checkpoint_backend=os.getenv("OUTREACH_CHECKPOINT_BACKEND", "sqlite"),
             checkpoint_postgres_url=os.getenv("OUTREACH_CHECKPOINT_POSTGRES_URL") or None,

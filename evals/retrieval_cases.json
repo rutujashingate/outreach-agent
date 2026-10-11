@@ -1,0 +1,25 @@
+{
+  "sources": [
+    {"id":"api", "text":"Built API observability systems using latency histograms, distributed tracing, and endpoint error-rate dashboards."},
+    {"id":"approvals", "text":"Email drafts require human review. The owner edits the prepared message and clicks Send manually in Gmail."},
+    {"id":"resume", "text":"Workflow checkpoints preserve completed steps, original goals, tool results, and remaining budgets across process restarts."},
+    {"id":"privacy", "text":"Uploaded PDF originals live in a private storage bucket. Only the authenticated Python backend retrieves their contents."},
+    {"id":"models", "text":"Instruction following uses Grok 4.3. Tool reasoning uses Grok 4.20. Evidence analysis uses the multi-agent research model."},
+    {"id":"contacts", "text":"A contact's explicit opt-out blocks future outreach even if older relationship facts expire."},
+    {"id":"search", "text":"Brave discovers public website URLs. The browser reads page text and retains the supporting source address and retrieval date."},
+    {"id":"garden", "text":"Tomatoes require sunlight, regular irrigation, fertile soil, and protection from frost."},
+    {"id":"baking", "text":"Bread dough rises when yeast ferments sugar. Kneading develops gluten and improves the loaf structure."},
+    {"id":"astronomy", "text":"Saturn has prominent icy rings. Its largest moon Titan has a dense atmosphere."},
+    {"id":"travel", "text":"Railway tickets can be reserved in advance. Travelers should check station departure times."},
+    {"id":"music", "text":"A violin has four strings. The player changes pitch by pressing strings against the fingerboard."}
+  ],
+  "queries": [
+    {"query":"Where did I work on monitoring slow requests?", "expected":"api"},
+    {"query":"Who authorizes delivery of the prepared outreach message?", "expected":"approvals"},
+    {"query":"How can an interrupted task pick up where it left off?", "expected":"resume"},
+    {"query":"Are my attached documents accessible to everyone?", "expected":"privacy"},
+    {"query":"Which AI handles thinking through function calls?", "expected":"models"},
+    {"query":"What happens when a recipient asks never to be contacted again?", "expected":"contacts"},
+    {"query":"How are online references found and recorded?", "expected":"search"}
+  ]
+}

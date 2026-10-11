@@ -24,7 +24,7 @@ flowchart TD
     telegram["Private Telegram<br/>Normal messages, files and decisions"] --> service["Shared service<br/>Saved queue and one worker"]
     dashboard["Owner dashboard<br/>Connections and controls"] --> service
     service --> chat["LANGGRAPH CONVERSATION<br/>4.3 instructions · 4.20 reasoning/tools<br/>Saved request + step + collected evidence"]
-    chat -->|Read evidence| tools["Bounded read-only tools<br/>Files · browser · search · run status<br/>Multi-Agent evidence analysis when needed"]
+    chat -->|Read evidence| tools["Bounded read-only tools<br/>Files · browser · web / saved search · run status<br/>Multi-Agent evidence analysis when needed"]
     tools --> chat
     chat -->|Answer or clarify| answer["Reply in Telegram<br/>Continue the conversation"]
     chat -->|Email drafts requested| proposal["Show request + Start outreach button"]
@@ -49,11 +49,16 @@ flowchart TD
     action --> outcome
     action --> notify["Notify owner: drafts are ready"]
     notify --> manual["YOU, IN GMAIL<br/>Review → edit → click Send"]
-    store[("SQLite OR Supabase Postgres<br/>Jobs, conversation, checkpoints and choices<br/>File text, events and action ledger")]
+    store[("SQLite OR Supabase PostgreSQL<br/>Jobs, conversation, checkpoints and choices<br/>File text, events and action ledger")]
+    tools -->|Save file / website evidence| index["Local embedding model<br/>Split passages · preserve sources"]
+    index --> knowledge[("Saved knowledge<br/>Supabase pgvector + keyword indexes")]
+    knowledge -. Relevant cited passages .-> tools
+    originals[("Private originals<br/>Local files OR Supabase Storage")]
+    originals -. Text extraction and OCR .-> files
     service -. Stop and continue same task .-> store
     approval -. Saved pause .-> store
     outcome -. Persist .-> store
     classDef decision fill:#fff6e6,stroke:#caa65d,color:#5b451b;
     classDef storage fill:#edf3fc,stroke:#8da6c7,color:#243b58;
     class qualification,review,destination decision;
-    class store,outcome storage;
+    class store,outcome,knowledge,originals storage;

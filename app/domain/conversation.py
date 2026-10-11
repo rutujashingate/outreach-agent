@@ -11,7 +11,7 @@ from app.domain.workflow import Record, WorkflowRequest
 
 
 class ConversationAction(Record):
-    action: Literal['reply', 'search', 'research', 'read_page', 'read_file', 'run_status', 'outreach']
+    action: Literal['reply', 'search', 'search_saved', 'research', 'read_page', 'read_file', 'run_status', 'outreach']
     text: str = Field(default='', max_length=6000)
     query: str = Field(default='', max_length=1000)
     url: str = Field(default='', max_length=2048)

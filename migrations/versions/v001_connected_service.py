@@ -13,7 +13,12 @@ def upgrade():
     # create_all adopts the seven original tables without altering/deleting
     # their contents. Later column changes must use a new explicit migration.
     bind = op.get_bind()
-    Base.metadata.create_all(bind)
+    # Freeze this historical revision: importing a later model must not create
+    # its table before the migration that installs its required extensions.
+    names = ('contacts', 'relationship_memory', 'interactions', 'external_actions',
+             'outreach_runs', 'contact_action_locks', 'workflow_events', 'service_values',
+             'run_metadata', 'service_jobs', 'telegram_updates', 'telegram_outbox')
+    Base.metadata.create_all(bind, tables=[Base.metadata.tables[name] for name in names])
     from sqlalchemy import select, insert
     from app.storage.models import RunRow, TraceRow, ActionRow
     from app.storage.control import RunMeta

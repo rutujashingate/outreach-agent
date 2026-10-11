@@ -53,6 +53,7 @@ def create_app(*, settings=None, manager=None, background=True):
             if manager is None:
                 service.store.recover()
                 service.documents.recover()
+                service.knowledge.recover()
             http = await stack.enter_async_context(httpx.AsyncClient(timeout=30))
             client = FakeTelegram() if configured.demo else TelegramClient(http, configured.telegram_token)
             bot = TelegramBot(service, client); application.state.bot = bot

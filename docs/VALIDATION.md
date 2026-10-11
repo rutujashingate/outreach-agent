@@ -1,5 +1,18 @@
 # Local validation
 
+## Private originals, pgvector retrieval, and storage checks — October 10, 2026
+
+- **494 tests passed** with `RUN_POSTGRES_TESTS=1 RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/pytest -o addopts='' -q --tb=short`. These include real local PostgreSQL/pgvector, Chromium, and OCR checks. Hosted Supabase requests use simulated HTTP responses; no cloud credentials are required for the suite.
+- New checks cover private bucket creation, server-key headers, bounded original downloads, upload reconciliation after a lost response, checksum verification, durable extraction/indexing, failed rebuilds retaining previous passages, keyword fallback, owner authentication, and temporary validation-data cleanup. A PostgreSQL conversation checkpoint was closed/reopened and continued with its saved search result and usage, without a second embedding query.
+- The actual local BGE embedding model retrieved the expected passage among the first five results for **7/7 questions**, compared with **2/7** for keyword-only retrieval on a 12-source English fixture. Hybrid mean reciprocal rank was **0.929**. This small retrieval fixture does not measure generated-answer accuracy or establish production relevance.
+- All four existing simulated outreach evaluations passed. These use scripted model responses and are separate from the real-embedding retrieval evaluation.
+- A real Chromium dashboard walkthrough signed in, uploaded a fictional text file, waited for indexing, searched saved knowledge, inspected the cited passage, ran storage validation, and downloaded the unchanged original. It used isolated local storage and fake embeddings/external services. The dashboard and rendered architecture diagram were visually inspected. Package dependencies, JavaScript syntax, and Git whitespace checks passed.
+- The local `.env` and shared template were simplified. Existing credential values and custom usage limits were preserved; redundant defaults and empty legacy settings were removed. The three new Supabase credential fields remain blank. Local databases, cached models, backups, and evaluation reports stay outside Git.
+
+**Still to verify:** hosted provisioning, private-bucket access, and hosted checkpoint/retrieval checks after the owner enters the three credentials in [Supabase setup](SUPABASE.md). Existing local records are preserved; switching stores does not import them. The running real service was not restarted, and no paid model request or real Telegram/Gmail message was sent. Live account/model acceptance and Docker execution remain separate checks.
+
+Earlier entries describe the checks and limitations at their respective phases.
+
 ## Model roles, tool calls, and task continuation — October 10, 2026
 
 - **470 tests passed** with `RUN_POSTGRES_TESTS=1 RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/pytest -o addopts='' -q --tb=short`. Real local Chromium, OCR, and temporary Postgres checks were enabled; no cloud credentials were required.

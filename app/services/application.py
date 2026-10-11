@@ -21,13 +21,15 @@ from app.storage.events import trace
 
 
 class AgentService:
-    def __init__(self, manager):
+    def __init__(self, manager, *, files=None, embedder=None):
         self.manager = manager
         self.store = ControlStore(manager.repository.engine)
         from app.services.tasks import TaskControls
         self.tasks = TaskControls(self)
+        from app.services.knowledge import KnowledgeService
+        self.knowledge = KnowledgeService(manager.repository.engine, manager.settings, embedder)
         from app.services.documents import DocumentService
-        self.documents = DocumentService(manager.repository.engine, manager.settings)
+        self.documents = DocumentService(manager.repository.engine, manager.settings, files, self.knowledge)
         from app.services.conversation import ConversationService
         self.conversations = ConversationService(self)
         self.stopping = asyncio.Event()
@@ -199,6 +201,13 @@ class AgentService:
             elif kind == 'document':
                 document = await self.documents.extract(job['payload']['document_id'])
                 result = None
+            elif kind == 'knowledge':
+                await self.knowledge.index(job['payload']['source_id'])
+                result = None
+            elif kind == 'storage_validation':
+                from app.services.storage_validation import validate_storage
+                await validate_storage(self)
+                result = None
             elif kind == "replies":
                 count = await self.check_replies()
                 self.store.put("reply_check", {"processed": count, "checked_at": now()})
@@ -208,6 +217,8 @@ class AgentService:
             self.store.finish_job(job["id"], status)
             if kind == 'document':
                 message = f"File ready: {document['filename']} ({len(document['content']['pages'])} pages/sections). Ask me a question about it, or inspect the text in the dashboard."
+            elif kind in {'knowledge', 'storage_validation'}:
+                return True  # Reports belong in the dashboard, not extra chat messages.
             else: message = (f"Run {run_id}: {result.state.current_step}.\nUse /review {run_id} or open the dashboard."
                        if result else f"Reply check complete: {count} new messages processed.")
             if result and result.state.gmail_action == 'draft':

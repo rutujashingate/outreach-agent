@@ -2,6 +2,10 @@
 
 The application code is licensed under the repository's [MIT License](LICENSE). Dependencies retain their own licenses.
 
+## Local embedding model
+
+Optional semantic search downloads [BAAI/bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5), released under the MIT License by the Beijing Academy of Artificial Intelligence. FastEmbed and ONNX Runtime retain their upstream licenses. Model files are cached outside Git and are not vendored into this repository.
+
 ## Playwright browser sandbox profile
 
 `docker/seccomp_profile.json` is copied without modification from [Microsoft Playwright v1.63.0](https://github.com/microsoft/playwright/blob/v1.63.0/utils/docker/seccomp_profile.json). Copyright Microsoft Corporation. It is provided under the Apache License, Version 2.0; the upstream [license is included here](docker/PLAYWRIGHT_LICENSE).

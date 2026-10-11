@@ -43,7 +43,7 @@ def test_migration_adopts_existing_contacts_and_is_repeatable(tmp_path):
             ControlStore(engine).put('queue',{'paused':True})
         finally: engine.dispose()
     with sqlite3.connect(path) as db:
-        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0]=='002_documents'
+        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0]=='003_knowledge'
 
 
 def test_cancelling_during_gmail_records_the_completed_action(make_run_manager,workflow_data):

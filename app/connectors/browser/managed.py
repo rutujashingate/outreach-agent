@@ -18,7 +18,11 @@ class ManagedBrowser:
         check_cancelled(self.repository, self.run_id)
         key = 'page:' + self.run_id + ':' + sha256(url.encode()).hexdigest()
         cached = self.store.get(key)
-        if cached: return PageEvidence.model_validate(cached)
+        if cached:
+            page = PageEvidence.model_validate(cached)
+            from app.services.knowledge import capture_page
+            capture_page(self.repository.engine, page)
+            return page
         self.store.reserve_browser(self.run_id, self.limits.max_browser_pages)
         trace(self.repository, self.run_id, 'browser_start', url=url)
         try:
@@ -27,5 +31,7 @@ class ManagedBrowser:
         except (ToolError, TimeoutError):
             page = PageEvidence(url=url, error='Page unavailable or blocked by browser limits.')
         self.store.put(key, page.model_dump(mode='json'))
+        from app.services.knowledge import capture_page
+        capture_page(self.repository.engine, page)
         trace(self.repository, self.run_id, 'browser_end', url=page.url, readable=page.error is None)
         return page

@@ -59,4 +59,12 @@ Say **stop**, then **continue**. The service finds the unfinished task in that c
 
 Completed model responses are cached using their exact task, input, schema, and workflow revision. A cache is a saved result that can be reused. Search and browser results are also cached per run. This protects work completed inside a step that had not yet reached its next checkpoint. Intentional revisions still receive a new review, even if the revised email text happens to be identical. Failed requests are not cached, and usage reservations are never refunded or reset by continuation. A network call interrupted before its result was saved can be repeated; Gmail writes keep their separate duplicate/uncertainty protection.
 
-Task links, stop flags, and small readable progress summaries use the existing database's service records. No additional database or credentials are needed. Supabase works through the same existing Postgres checkpoint adapter when configured; otherwise storage stays local SQLite. The dashboard shows stop/continue controls and saved progress. The broader validation dashboard remains a separate feature.
+Task links, stop flags, and readable progress summaries use the database's service records. Supabase uses the same Postgres checkpoint adapter; otherwise storage stays local SQLite. The dashboard shows stop/continue controls, saved progress, and live storage validation. Storage checks make no Grok calls and do not replace quality evaluations of generated answers.
+
+## Search saved knowledge
+
+When enabled, `search_saved(query)` is another validated read-only tool. It searches documents and browser-read pages saved in earlier conversations, using local text embeddings plus keyword ranking. Embeddings represent meaning as numbers; pgvector stores and compares them inside Supabase PostgreSQL. The default English model runs on the computer/server and needs no extra API key. Grok still interprets the question and writes the answer.
+
+Search returns at most five passages with source dates, file/page or URL references, and background/research roles. Results become saved tool observations and survive stop/continue. Personal background is excluded when forming prospect-research material. Website text is historical until refreshed; source text never becomes instructions or permission to create emails. A missing embedding model produces clearly labelled keyword-only matches.
+
+The dashboard's **Saved knowledge** view lets you inspect the actual retrieved text and reindex sources. [Setup and evaluation](SUPABASE.md) explain model download, private files, and measuring retrieval. Images are searched through OCR-extracted text.

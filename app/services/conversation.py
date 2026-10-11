@@ -89,6 +89,7 @@ class ConversationService:
                                         'purpose': reference.purpose} for f, reference in zip(files, state.attachments)],
                     'sender_profile': self.store.get('sender_profile', {'name': 'User', 'context': ''}),
                     'capabilities': {'search': self.manager.search is not None, 'browser': self.manager.browser is not None,
+                                     'knowledge': self.manager.settings.semantic_search_enabled,
                                      'research': self.manager.settings.model_provider == 'xai' and self.manager.settings.xai_task_routing,
                                      'gmail_connected': bool(account.get('connected')),
                                      'sending_enabled': False,
@@ -172,7 +173,8 @@ class ConversationService:
         messages = [context.inputs['message'], *(turn['user'] for turn in context.inputs['history'])]
         seeds = {value.rstrip('.,;:!?)\'\"]') for text in messages for value in re.findall(r'https?://[^\s<>]+', text)}
         evidence = [*context.inputs['previous_evidence'], *observations]
-        seeds.update(source['ref'] for item in evidence if item['tool'] in {'search', 'research'} for source in item['sources'])
+        seeds.update(source['ref'] for item in evidence if item['tool'] in {'search', 'search_saved', 'research'}
+                     for source in item['sources'] if source['ref'].startswith(('https://', 'http://')))
         if url in seeds:
             return 0
         for item in evidence:
@@ -203,7 +205,19 @@ class ConversationService:
             observation['function_call'] = {'type': 'function_call', 'call_id': action.call_id,
                 'name': action.action, 'arguments': json.dumps({field: getattr(action, field)})}
         try:
-            if action.action == 'research':
+            if action.action == 'search_saved':
+                result = await self.service.knowledge.search(action.query)
+                passages = result['matches']
+                # An explicitly attached file retains its role in this task.
+                roles = {'document:' + item['document_id']: item['purpose'] for item in context.inputs['attached_files']}
+                for item in passages:
+                    item['purpose'] = roles.get(item['ref'].split('#')[0], item['purpose'])
+                observation['passages'] = passages
+                observation['content'] = json.dumps(passages, ensure_ascii=False)
+                observation['sources'] = [{'ref': item['ref'], 'label': item['label']} for item in passages]
+                observation['warnings'] = [result['notice'], *([result['warning']] if result['warning'] else [])]
+                observation['mode'] = result['mode']
+            elif action.action == 'research':
                 evidence = [item for item in [*context.inputs['previous_evidence'], *observations]
                             if not item.get('error') and item.get('content') and item.get('sources')]
                 if not evidence or not context.client.supports_task_routing:
@@ -216,6 +230,11 @@ class ConversationService:
                     raise ModelResponseError('Research analysis returned unsupported source references.')
                 observation['content'] = analysis.summary[:12000]
                 observation['sources'] = [sources[ref] for ref in dict.fromkeys(analysis.sources)]
+                background_refs = {source['ref'] for item in evidence if item.get('purpose') == 'background'
+                    for source in item['sources']}
+                background_refs.update(passage['ref'] for item in evidence for passage in item.get('passages', [])
+                                       if passage['purpose'] == 'background')
+                if background_refs.intersection(analysis.sources): observation['purpose'] = 'background'
                 observation['warnings'] = ['Research analysis uses collected evidence; it is not a verbatim source page.']
             elif action.action == 'search':
                 if context.search is None:
@@ -333,9 +352,17 @@ class ConversationService:
                 self.manager.validate_request(request)
                 # Supply actual tool evidence, not model-written research claims.
                 purposes = {item['document_id']: item['purpose'] for item in context.inputs['attached_files']}
-                material = '\n\n'.join(json.dumps(item, ensure_ascii=False) for item in evidence if item.get('sources')
-                    and not (item.get('tool') == 'read_file' and
-                             purposes.get(item.get('document_id'), item.get('purpose')) == 'background'))
+                research_evidence = []
+                for item in evidence:
+                    if not item.get('sources') or item.get('purpose') == 'background': continue
+                    if item.get('tool') == 'read_file' and purposes.get(item.get('document_id'), item.get('purpose')) == 'background': continue
+                    if item.get('tool') == 'search_saved':
+                        passages = [p for p in item.get('passages', []) if p['purpose'] == 'research']
+                        if not passages: continue
+                        item = {**item, 'passages': passages, 'content': json.dumps(passages, ensure_ascii=False),
+                                'sources': [{'ref': p['ref'], 'label': p['label']} for p in passages]}
+                    research_evidence.append(item)
+                material = '\n\n'.join(json.dumps(item, ensure_ascii=False) for item in research_evidence)
                 request = request.model_copy(update={'research_material': material[:100000]})
                 result['proposal'] = request.model_dump(mode='json')
                 result['text'] = ('Ready to start this outreach request:\n' + request.goal +

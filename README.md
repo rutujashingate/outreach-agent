@@ -5,13 +5,14 @@
 
 A conversational Telegram assistant for questions, file reading, public-web research, and outreach. Emails are prepared only when you ask. The agent saves requested, reviewed drafts in Gmail and notifies you; you review, edit, and click **Send** yourself.
 
-**Python 3.12+ · LangGraph · FastAPI · Grok (xAI)/Groq/OpenAI · SQLite or Supabase Postgres · Playwright · Telegram · Gmail**
+**Python 3.12+ · LangGraph · FastAPI · Grok (xAI)/Groq/OpenAI · SQLite or Supabase PostgreSQL + pgvector · Playwright · Telegram · Gmail**
 
 ## What it does
 
 - Answers normal Telegram messages, remembers recent conversation, and chooses read-only tools when needed. `/new` is an optional reset; `/guided` opens step-by-step outreach setup.
 - Reads uploaded PDFs, scanned pages, images, Word/OpenDocument files, and text. Uses relevant content to guide research, with filename/page references.
 - Researches public websites and optional Brave results; retains sources and published email evidence.
+- Searches saved documents and website evidence across conversations by meaning and keywords, with local embeddings and cited passages. The dashboard exposes the library and live storage checks. [Supabase and search setup](docs/SUPABASE.md).
 - Routes instruction following to Grok 4.3, reasoning/tool selection to Grok 4.20, and evidence analysis to 4.20 Multi-Agent. [Models and tools](docs/MODELS_AND_TOOLS.md).
 - Qualifies prospects, checks relationship history and contact rules, and writes personalized drafts.
 - Shows drafts, evidence, progress, retries, and cancellation in Telegram and the dashboard. App-only drafts retain review controls.
@@ -47,7 +48,7 @@ python -m pytest
 python -m evals.run --output .data/evaluations.json
 ```
 
-Tests and the default evaluations use local substitutes. The [validation record](docs/VALIDATION.md) lists completed and pending checks. Storage defaults to two local SQLite files; [Supabase setup](docs/SUPABASE.md) puts application records and workflow progress in one hosted Postgres database.
+Tests and the default evaluations use local substitutes. The [validation record](docs/VALIDATION.md) lists completed and pending checks. Storage defaults to local SQLite and files; [Supabase setup](docs/SUPABASE.md) connects one hosted database, private file storage, and pgvector search.
 
 ## Documentation and contributions
 

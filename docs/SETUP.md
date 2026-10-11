@@ -26,11 +26,11 @@ If you do not have `.env` yet, copy `.env.example` to `.env`. If you already hav
 | `OUTREACH_OWNER_PASSWORD` | A strong password you choose for the dashboard. Required for normal browser login. |
 | `OUTREACH_MODEL_PROVIDER=xai` | Selects Grok on xAI for conversation and outreach. The template selects this explicitly; the app does not switch providers when a call fails. |
 | `XAI_API_KEY` | Your API key from [xAI Console](https://console.x.ai/). Paste it only into `.env`. An existing key works if its permissions and team's available API credits allow the request. |
-| `XAI_TASK_ROUTING=true` | Selects the three model roles below. One xAI key serves all of them. |
+| `XAI_TASK_ROUTING=true` | Optional override; already enabled by default. One xAI key serves all three roles. |
 | `XAI_INSTRUCTION_MODEL=grok-4.3` | Understand instructions and write drafts. |
 | `XAI_REASONING_MODEL=grok-4.20-0309-reasoning` | Select tools, reason over results, qualify and review. |
 | `XAI_RESEARCH_MODEL=grok-4.20-multi-agent-0309` | Analyze supplied research evidence with four collaborating agents. |
-| `XAI_REASONING_EFFORT=none` | Applies to the instruction model only. Multi-agent research uses `low`; the reasoning model uses its built-in reasoning behavior. |
+| `XAI_REASONING_EFFORT=none` | Optional override; `none` is already the instruction-model default. Multi-agent research uses `low`; the reasoning model uses its built-in reasoning behavior. |
 | `OUTREACH_TELEGRAM_BOT_TOKEN` | Token for your bot, issued by Telegram’s BotFather. |
 | `OUTREACH_TELEGRAM_OWNER_ID` | Your numeric Telegram user ID. The bot accepts only this user in their private chat. |
 | `BRAVE_SEARCH_API_KEY` | Optional [Brave Search API](https://brave.com/search/api/) key. Finds relevant pages. Omit it when supplying URLs or notes yourself. |
@@ -39,9 +39,14 @@ If you do not have `.env` yet, copy `.env.example` to `.env`. If you already hav
 | `OUTREACH_OCR_LANGUAGES=eng` | Installed Tesseract language codes for reading image text. English is the default; PDF/document text needs no OCR installation. |
 | `OUTREACH_READ_GMAIL=true` | Allows relevant conversation history to inform relationship checks. On-demand **Check replies** is a separate explicit action. |
 | `OUTREACH_SUPABASE_DATABASE_URL` | Optional database connection string for both records and workflow progress. Leave empty for SQLite; follow [Supabase setup](SUPABASE.md). |
+| `OUTREACH_SUPABASE_URL`, `OUTREACH_SUPABASE_SECRET_KEY` | Project HTTPS address and server-only key for private original-file storage. These differ from the database URL and Gmail encryption key. |
+| `OUTREACH_DOCUMENT_STORAGE=local` | Use `supabase` after cloud setup. Originals are otherwise saved locally. |
+| `OUTREACH_SEMANTIC_SEARCH_ENABLED=false` | Set `true` after installing the semantic extra and downloading the local embedding model. Enables a searchable library across conversations. |
 | `OUTREACH_APP_URL` | The exact browser origin, initially `http://127.0.0.1:8000`. Use this same address for login and the Google callback. |
 
 Do not put secrets in Telegram messages, goals, Git commits, or screenshots. A connection shown as “configured” only means settings are present; the provider verifies them when called.
+
+The template keeps the current provider and connector fields. Default host/port, OCR language, local data path, legacy database URLs, and unused provider keys are omitted. Custom overrides remain supported. For cloud storage and semantic search, follow [Supabase setup](SUPABASE.md); the setup command creates tables, pgvector indexes, and the private bucket.
 
 The xAI adapter uses [Responses](https://docs.x.ai/developers/rest-api-reference/inference/responses), native function calls for conversation tools, structured records, `store=false`, and the app's output-token limit (4,000 by default). Website research uses the local browser and optional Brave connector; xAI-hosted search tools are not enabled. Research analyzes the gathered evidence. The output limit covers visible output, not all internal reasoning. See [models and tools](MODELS_AND_TOOLS.md) for the role map, flowchart, limits, and compatibility settings.
 
@@ -210,19 +215,17 @@ Verify your address on Connections. Ask for one draft addressed to yourself, sta
 
 ## 5. Storage, limits, and recovery
 
-Leave these defaults for local operation:
+Local operation needs no database credentials. The minimal template keeps:
 
 ```dotenv
-OUTREACH_DATA_DIR=.data
 OUTREACH_SUPABASE_DATABASE_URL=
-OUTREACH_DATABASE_URL=
-OUTREACH_CHECKPOINT_BACKEND=sqlite
-OUTREACH_CHECKPOINT_POSTGRES_URL=
+OUTREACH_DOCUMENT_STORAGE=local
+OUTREACH_SEMANTIC_SEARCH_ENABLED=false
 ```
 
 With an empty Supabase URL, both files use **SQLite**. `relationships.sqlite3` contains runs, jobs, contacts, events, decisions, and encrypted credentials. `checkpoints.sqlite3` contains LangGraph progress. For hosted storage, follow [Supabase setup](SUPABASE.md): one URL selects the same Postgres database for both kinds of records. Existing SQLite data is preserved but not automatically copied. Local Postgres restart, checkpoint, and duplicate-draft checks are included in the tests; connecting your actual Supabase project is a separate setup step.
 
-Migrations apply automatically on startup. Uploaded originals live in `uploads/`, and extracted text/metadata live in the application database. Back up the entire data directory with the service stopped and retain the encryption key separately. Do not delete SQLite journal/WAL files from a running service. Use the same directory after restart; approvals and queued work remain available. Interrupted executions require **Retry**. An uncertain Gmail write remains blocked: inspect Gmail and the recorded outcome before attempting any manual recovery.
+Migrations apply automatically on startup. Local originals live in `.data/uploads/`; Supabase originals live in its private bucket. Extracted text and metadata live in the database. Local model artifacts live in `.data/models/`. Follow [Supabase setup](SUPABASE.md) to install local embeddings, provision the cloud resources, test semantic retrieval, and run dashboard storage validation. Back up local data with the service stopped, hosted database and bucket contents separately, and retain the encryption key. Do not delete SQLite journal/WAL files from a running service. Use **continue** or explicit retry for interrupted work. Uncertain Gmail writes remain blocked for inspection.
 
 **Pause queue** prevents new jobs from starting; it does not interrupt the active job. **Cancel run** stops further work at a safe boundary. If Gmail is already creating a draft, the application records that result before stopping.
 

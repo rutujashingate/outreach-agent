@@ -10,6 +10,7 @@ let csrf = "",
   editing = null;
 let loading = false,
   submittingRun = false;
+let knowledgeQuery = "", knowledgeResults = null;
 function node(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
@@ -225,6 +226,7 @@ function pagination(number, total, size, change) {
 }
 async function refresh() {
   if (!csrf || loading) return;
+  if (view === "knowledge" && document.activeElement?.id === "knowledge-query") return;
   loading = true;
   try {
     document
@@ -240,6 +242,12 @@ async function refresh() {
       currentRun = await api(`/api/runs/${runId}?event_page=${eventPage}`);
       content = renderDetail(currentRun);
       $("page-title").textContent = "Run details";
+    } else if (view === "knowledge") {
+      const [sources, connections] = await Promise.all([
+        api(`/api/knowledge/sources?page=${page}`), api("/api/connectors"),
+      ]);
+      content = renderKnowledge(sources, connections.knowledge);
+      $("page-title").textContent = "Saved knowledge";
     } else if (view === "runs") {
       const data = await api(`/api/runs?page=${page}`);
       content = panel(
@@ -523,6 +531,7 @@ function renderConnections(c) {
       c.storage?.database === "supabase" ? "Supabase PostgreSQL" : (c.storage?.database || "local"),
       `Jobs, conversations, drafts and workflow progress are saved. Checkpoints: ${c.storage?.checkpoints || "unknown"}. Email sending is manual in Gmail.`,
     ),
+    storageValidation(c.storage),
     card(
       "M",
       "Model provider",
@@ -541,6 +550,58 @@ function renderConnections(c) {
     ),
     profile,
   );
+}
+function storageValidation(storage) {
+  const report = storage?.validation;
+  const start = button("Validate storage", async () => {
+    await post("/api/storage/validate");
+    notice("Storage checks queued. They use no Grok or Gmail calls. A paused queue must be resumed first.");
+    await refresh();
+  });
+  if (["queued", "running"].includes(report?.status)) start.disabled = true;
+  return panel("Storage validation", node("p", {}, `Original files: ${storage?.files || "local"}. These checks test live write/read access; restart recovery is checked separately.`),
+    start, report ? node("div", {}, badge(report.status), node("p", {class: "muted"}, date(report.finished_at || report.started_at)),
+      ...(report.checks || []).map((check) => node("div", {class: "metric-row"},
+        node("span", {}, `${check.name.replaceAll("_", " ")} · ${check.duration_ms} ms`),
+        badge(check.status), check.error ? node("p", {}, check.error) : ""))) : node("p", {}, "No validation has run yet."));
+}
+function renderKnowledge(sources, status) {
+  const input = node("input", {id: "knowledge-query", type: "text", maxlength: "1000", required: "",
+    placeholder: "Find my experience with API monitoring", oninput: (event) => { knowledgeQuery = event.target.value; }});
+  input.value = knowledgeQuery;
+  const form = node("form", {onsubmit: (event) => {
+    event.preventDefault();
+    input.blur();
+    perform(async () => {
+      knowledgeResults = await post("/api/knowledge/search", {query: knowledgeQuery});
+      await refresh();
+    });
+  }}, node("label", {}, "Search saved documents and website evidence", input),
+    node("button", {type: "submit", class: "primary", ...(status.enabled ? {} : {disabled: ""})}, "Search"));
+  const results = knowledgeResults;
+  const matches = results ? panel("Matching passages", node("p", {class: "muted"}, `${results.mode} search · ${results.notice}`),
+    results.warning ? node("p", {}, results.warning) : "",
+    ...results.matches.map((match) => panel(match.label,
+      link(match.ref, `${match.kind} · page/section ${match.page}`),
+      node("p", {class: "muted"}, `${match.purpose} · saved ${date(match.retrieved_at)}`),
+      node("pre", {class: "draft"}, match.text))),
+    results.matches.length ? "" : node("p", {}, "No matching passages. Upload a document or read a website first.")) : "";
+  return node("div", {}, panel("Search your library", node("p", {},
+    status.enabled ? `Local embeddings · ${status.embedding.model} · ${status.passages} passages. Saved knowledge can be used across conversations.` :
+    "Semantic search is disabled. Follow the Supabase setup guide to enable it."),
+    status.embedding.error ? node("p", {}, status.embedding.error) : "", form), matches,
+    panel("Saved sources", ...sources.items.map((source) => node("div", {class: "panel"},
+      node("h3", {}, source.label, " ", badge(source.status)),
+      link(source.kind === "document" ? source.ref + "#page=1" : source.ref),
+      node("p", {class: "muted"}, `${source.kind} · ${source.purpose} · ${date(source.retrieved_at)}`),
+      source.error ? node("p", {}, source.error) : "",
+      button("Reindex source", async () => {
+        await post(`/api/knowledge/sources/${source.id}/reindex`);
+        notice("Indexing queued; the previous passages remain available until the rebuild succeeds.");
+        await refresh();
+      }))), sources.items.length ? "" : node("p", {}, "Your library is empty."),
+      node("div", {class: "actions"}, button("Previous", async () => {page = Math.max(1, page-1); await refresh();}),
+        button("Next", async () => {if (sources.items.length === 20) {page++; await refresh();}}))));
 }
 function renderDetail(data) {
   const state = data.state;
@@ -1085,6 +1146,7 @@ async function previewDocument(id) {
   const document = await api("/api/documents/" + id);
   $("document-title").textContent = document.filename;
   $("document-content").replaceChildren(
+    node("a", {href: `/api/documents/${id}/original`, download: document.filename}, "Download original"),
     node("p", { class: "muted" }, document.status),
     document.error ? node("p", {}, document.error) : "",
     ...(document.content.warnings || []).map((w) =>

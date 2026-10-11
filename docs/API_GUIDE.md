@@ -19,6 +19,11 @@ Use a stable `Idempotency-Key` header for each intended queued action. Repeating
 | `POST /api/documents?filename=notes.pdf` | Upload raw file bytes, save an extraction job, and return 202 with `{document, job}`. |
 | `GET /api/documents?page=1` | List saved file metadata, 20 records per page. Optional `ids=ID1,ID2` looks up at most five references. |
 | `GET /api/documents/{id}` | Inspect saved metadata, extraction status, pages, warnings, or error. |
+| `GET /api/documents/{id}/original` | Owner-authenticated, checksum-checked original download with an attachment filename. No public bucket URL. |
+| `GET /api/knowledge/sources?page=1` | List 20 saved source versions/status records per page. |
+| `POST /api/knowledge/search` | Search with `{"query":"my API monitoring experience"}`. Returns `mode`, at most five cited `matches`, `warning`, and `notice`; up to 8,000 passage-text characters. Blank/oversized input receives 422. |
+| `POST /api/knowledge/sources/{id}/reindex` | Queue a rebuild; returns 202 and a job ID. Previous published passages remain searchable until the rebuild succeeds. |
+| `POST /api/storage/validate` | Queue database, checkpoint, file, privacy, embedding, retrieval, and cleanup checks; returns 202. Read the latest report in `/api/connectors` → `storage.validation`. |
 | `POST /api/documents/{id}/retry` | Explicitly retry a failed file; returns 202 with `{document, job}`. |
 | `GET /api/overview` | Run statistics, current queue/worker status, recent jobs, usage, and connector status. |
 | `GET /api/runs?page=1&limit=20` | Paginated outreach history; up to 100 records per page. |
@@ -43,6 +48,8 @@ Use a stable `Idempotency-Key` header for each intended queued action. Repeating
 The retired `/outreach`, `/runs`, interactive CLI, and public OpenAPI docs are not entry points in this application.
 
 Run details include `saved_progress` when available: `next_steps` names saved graph steps, and chat also reports `completed_tools`. Chat has a separate checkpoint thread (`chat:RUN_ID`) in the configured database. Continuing uses the original inputs rather than a new goal. Connector status includes non-secret `model_routes` when xAI routing is active.
+
+Connector status also reports the original-file backend, source/index counts, local embedding configuration, and the latest storage validation. Search results retain source type, background/research purpose, page/URL, saved date, and source-content hash. Rank scores order candidates; they are not probabilities. Search and validation use no Grok or Gmail calls. A paused queue also pauses validation and indexing jobs.
 
 ## Start a run
 
