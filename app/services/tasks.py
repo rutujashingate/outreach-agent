@@ -34,7 +34,7 @@ class TaskControls:
         repository = self.service.manager.repository
         if run_id:
             row = repository.run(run_id)
-            if row is None or (self.store.metadata(run_id) or {}).get('kind') not in {'chat', 'outreach'}:
+            if row is None or (self.store.metadata(run_id) or {}).get('kind') not in {'chat', 'outreach', 'gmail_edit'}:
                 raise RunNotFound('Unknown conversation or outreach task.')
             return run_id, row
         ids = self.store.get('tasks:' + session_id, {}).get('run_ids', [])
@@ -91,6 +91,11 @@ class TaskControls:
         if row['status'] in {'completed', 'cancelled'}:
             return {'run_id': run_id, 'message': prefix + f'This task is {row["status"]}. Describe the additional work as a new request.'}
         kind = self.store.metadata(run_id)['kind']
+        if kind == 'gmail_edit':
+            if row['status'] == 'paused':
+                return {'run_id': run_id, 'needs': 'review', 'message': 'Please review the proposed Gmail changes before I continue.'}
+            job = self.service.retry(run_id, key)
+            return {'run_id': run_id, 'job': job, 'message': "I'll pick up the proposed edit where we left off."}
         graph = self.service.conversations.graph if kind == 'chat' else self.service.manager.graph
         config = self.service.conversations.config(run_id) if kind == 'chat' else self.service.manager.config(run_id)
         snapshot = await graph.aget_state(config)

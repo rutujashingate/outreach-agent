@@ -1,5 +1,19 @@
 # Local validation
 
+## Tools, complete email bodies, and approved Gmail edits — October 11, 2026
+
+- **555 tests passed** with `RUN_POSTGRES_TESTS=1 RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/pytest -o addopts='' -o faulthandler_timeout=30 -q --tb=short`. Real local PostgreSQL/pgvector, Chromium, and OCR checks were enabled. No cloud credentials are required by the tests.
+- Native model-request tests verify that a fresh research command overrides an inappropriate old-email reply, that the current message is its own turn, and that first research/edit calls actually invoke the required search/page/Gmail-read tool. Draft-edit tests verify 4.3 instruction/writing and 4.20 reasoning/review routing. Existing tests cover Multi-Agent evidence analysis and matched function-call/results.
+- Corrected xAI's whole-string email-body pattern; validation permits complete multiline messages and rejects fragments/placeholders before caching, review, or Gmail creation. Explicit retry can obtain a complete replacement instead of repeatedly loading an invalid cached result. Writing/review prompts require the complete final message.
+- Fake Telegram/Gmail checks cover empty-draft repair, original content remaining unchanged before approval, same-ID replacement, repeated callbacks, rejection, stale fingerprints, manual Gmail changes, account switches, uncertain confirmations, cancellation, continuation without approval, and ambiguous recipients. Mock REST checks retain CC, reply headers, attachments, HTML alternatives, and thread IDs.
+- A temporary local PostgreSQL database retained pending edits across a full runtime close/reopen. Two concurrent approvals returned the same job ID and produced one fake Gmail update. Authenticated dashboard API checks verify login, CSRF, exact fingerprints, shared decisions, and refusal of a send action. Updates do not inflate the newly created-draft counter.
+- A real Chromium walkthrough signed in to an isolated dashboard, inspected the original and proposed email, approved changes, and verified one same-ID fake Gmail update without JavaScript errors. The preview and regenerated workflow image were visually inspected. The isolated demo used no real mailbox or model calls.
+- A live keyless DuckDuckGo query returned five public results without a Brave key. This checks discovery, not the accuracy or completeness of funding claims. The browser still reads public pages separately and retains its existing network/visit limits. Public search can be rate-limited.
+- Paused the idle local queue, gracefully restarted the configured service, and restored the previous unpaused setting. Owner login and health succeeded; all four background components reported running. Telegram and Gmail remained connected, Supabase storage was retained, and Connections reported keyless DuckDuckGo plus the requested three xAI model roles.
+- All four existing offline evaluation examples passed. Dependency consistency, Python compilation, JavaScript syntax, and Git whitespace checks passed. README, setup/API/model documentation, and phase 49 of the file guide describe the working paths.
+
+Real Gmail replacement and live generated wording remain the owner's acceptance check: ask for an existing-draft edit, inspect the preview, and approve only the desired content. No paid model inference, unsolicited Telegram message, or real Gmail write was performed for validation.
+
 ## Immediate starts for clear Telegram requests — October 11, 2026
 
 - Clear instructions to draft now queue the existing workflow directly. The optional confirmation remains when the owner explicitly asks to wait. Research and file-reading requests retain their immediate read-only execution and do not create emails.

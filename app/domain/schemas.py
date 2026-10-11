@@ -27,11 +27,11 @@ NonEmptyText = Annotated[
     StringConstraints(strict=True, strip_whitespace=True, min_length=1),
 ]
 
-# An email body keeps its original spacing and line breaks. The pattern \S
-# requires at least one character that is not whitespace.
+# Keep formatting and require a non-space character. xAI matches patterns
+# against the entire string, so surrounding text must be allowed explicitly.
 EmailBody = Annotated[
     str,
-    StringConstraints(strict=True, min_length=1, pattern=r"\S"),
+    StringConstraints(strict=True, min_length=1, pattern=r"[\s\S]*\S[\s\S]*"),
 ]
 
 

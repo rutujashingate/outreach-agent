@@ -80,7 +80,8 @@ def test_native_tools_research_and_results_flow_through_the_real_chat_graph(make
     assert pair[0]['type'] == 'function_call' and pair[1]['type'] == 'function_call_output'
     assert pair[0]['call_id'] == pair[1]['call_id'] == 'call-1'
     assert 'observability' in pair[1]['output']
-    assert {t['name'] for t in requests[1]['tools']} == {'read_page', 'run_status'}
+    assert {t['name'] for t in requests[1]['tools']} == {'read_page'}
+    assert requests[1]['tool_choice'] == 'required'
 
 
 def test_outreach_tasks_choose_all_three_roles(make_run_manager, workflow_data):

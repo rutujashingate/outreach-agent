@@ -24,6 +24,9 @@ class GmailTool(Protocol):
     async def search_threads(self, email: str, limit: int = 3) -> list[str]: ...
     async def read_thread(self, thread_id: str) -> dict: ...
     async def create_draft(self, sender: Sender, recipient: Recipient, draft: EmailDraft) -> dict: ...
+    async def list_drafts(self, query: str = '', limit: int = 5) -> list[dict]: ...
+    async def read_draft(self, draft_id: str) -> dict: ...
+    async def update_draft(self, draft_id: str, baseline_hash: str, draft: EmailDraft) -> dict: ...
     async def send(self, sender: Sender, recipient: Recipient, draft: EmailDraft) -> dict: ...
 
 
@@ -106,11 +109,33 @@ class GmailClient:
         return await self._request("GET", "threads/" + quote(thread_id, safe=""), params={"format": "full"})
 
     async def create_draft(self, sender: Sender, recipient: Recipient, draft: EmailDraft) -> dict:
+        from app.agent.components.writer import validate_email_content
+        validate_email_content(draft)
         result = await self._request("POST", "drafts", json={
             "message": {"raw": encode_message(sender, recipient, draft)},
         })
         if not isinstance(result.get("id"), str) or not result["id"]:
             raise ToolError("Gmail draft response had no identifier.")
+        return result
+
+    async def list_drafts(self, query='', limit=5):
+        data = await self._request('GET', 'drafts', params={'q': query, 'maxResults': min(max(limit, 1), 10)})
+        return data.get('drafts', [])
+
+    async def read_draft(self, draft_id):
+        return await self._request('GET', 'drafts/' + quote(draft_id, safe=''), params={'format': 'raw'})
+
+    async def update_draft(self, draft_id, baseline_hash, draft):
+        from app.connectors.gmail.drafts import snapshot, updated_raw, DraftChanged
+        original = snapshot(await self.read_draft(draft_id))
+        if original['draft_id'] != draft_id or original['baseline_hash'] != baseline_hash:
+            raise DraftChanged('The Gmail draft changed after your preview. Request new proposed edits.')
+        payload = {'raw': updated_raw(original, draft)}
+        if original['thread_id']:
+            payload['threadId'] = original['thread_id']
+        result = await self._request('PUT', 'drafts/' + quote(draft_id, safe=''), json={'id': draft_id, 'message': payload})
+        if result.get('id') != draft_id:
+            raise ToolError('Gmail did not confirm the expected draft update. Inspect it before retrying.')
         return result
 
     async def send(self, sender: Sender, recipient: Recipient, draft: EmailDraft) -> dict:
@@ -125,8 +150,9 @@ class GmailClient:
 class FakeGmailClient:
     """Record simulated Gmail operations. No email or draft leaves the computer."""
 
-    def __init__(self, threads: dict[str, dict] | None = None):
+    def __init__(self, threads: dict[str, dict] | None = None, *, drafts=None):
         self.threads = deepcopy(threads or {})
+        self.drafts = deepcopy(drafts or {})
         self.calls: list[tuple[str, object]] = []
 
     async def search_threads(self, email: str, limit: int = 3) -> list[str]:
@@ -138,9 +164,40 @@ class FakeGmailClient:
         return deepcopy(self.threads[thread_id])
 
     async def create_draft(self, sender: Sender, recipient: Recipient, draft: EmailDraft) -> dict:
+        from app.agent.components.writer import validate_email_content
+        validate_email_content(draft)
         self.calls.append(("draft", {"to": recipient.email, **draft.model_dump()}))
-        return {"id": f"draft-{len(self.calls)}", "message": {"id": "message-1", "threadId": "thread-1"}}
+        identifier = f'draft-{len(self.calls)}'
+        self.drafts[identifier] = {'id': identifier, 'message': {'id': 'message-1', 'threadId': 'thread-1',
+            'raw': encode_message(sender, recipient, draft)}}
+        return {"id": identifier, "message": {"id": "message-1", "threadId": "thread-1"}}
+
+    async def list_drafts(self, query='', limit=5):
+        self.calls.append(('list_drafts', query))
+        from app.connectors.gmail.drafts import snapshot
+        return [{'id': identifier} for identifier, item in self.drafts.items()
+                if not query or query.casefold().removeprefix('to:') in json_searchable(snapshot(item))][:limit]
+
+    async def read_draft(self, draft_id):
+        self.calls.append(('read_draft', draft_id))
+        if draft_id not in self.drafts:
+            raise ToolError('The Gmail draft no longer exists.')
+        return deepcopy(self.drafts[draft_id])
+
+    async def update_draft(self, draft_id, baseline_hash, draft):
+        from app.connectors.gmail.drafts import snapshot, updated_raw, DraftChanged
+        original = snapshot(await self.read_draft(draft_id))
+        if original['baseline_hash'] != baseline_hash:
+            raise DraftChanged('The Gmail draft changed after your preview. Request new proposed edits.')
+        self.calls.append(('update_draft', draft_id))
+        self.drafts[draft_id]['message']['raw'] = updated_raw(original, draft)
+        return deepcopy(self.drafts[draft_id])
 
     async def send(self, sender: Sender, recipient: Recipient, draft: EmailDraft) -> dict:
         self.calls.append(("send", {"to": recipient.email, **draft.model_dump()}))
         return {"id": f"message-{len(self.calls)}", "threadId": "thread-1"}
+
+
+def json_searchable(value):
+    import json
+    return json.dumps({key: item for key, item in value.items() if key != 'raw'}).casefold()

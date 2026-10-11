@@ -130,6 +130,12 @@ class ConversationService:
                     'chat:result:' + run_id: cached,
                     'resume:' + run_id: {'next_steps': [], 'completed_tools': len(output.get('observations', []))}})
             await check_cancelled(self.manager.repository, run_id)
+            if cached.get('edit_request'):
+                edit = cached['edit_request']
+                started = await asyncio.to_thread(self.service.draft_edits.queue, edit['instruction'], edit['snapshot_key'],
+                    'chat:edit:' + run_id, payload['session_id'])
+                cached = {**cached, 'started_edit_run_id': started['run_id']}
+                await asyncio.to_thread(self.store.put, 'chat:result:' + run_id, cached)
             if cached.get('start_requested'):
                 # Save the model's request before this step. A restart or a
                 # lost database confirmation reuses the same child job key.
@@ -219,7 +225,11 @@ class ConversationService:
             observation['function_call'] = {'type': 'function_call', 'call_id': action.call_id,
                 'name': action.action, 'arguments': json.dumps({field: getattr(action, field)})}
         try:
-            if action.action == 'search_saved':
+            if action.action == 'read_gmail_draft':
+                result = await self.service.draft_edits.read(action.query, context.run_id)
+                observation['content'] = json.dumps(result, ensure_ascii=False)
+                observation['draft_snapshot'] = result
+            elif action.action == 'search_saved':
                 result = await self.service.knowledge.search(action.query)
                 passages = result['matches']
                 # An explicitly attached file retains its role in this task.
@@ -302,13 +312,14 @@ class ConversationService:
                     if not recent:
                         raise ToolError('There are no outreach runs yet.')
                     run_id = recent[0]['run_id']
-                if (self.store.metadata(run_id) or {}).get('kind') != 'outreach':
+                if (self.store.metadata(run_id) or {}).get('kind') not in {'outreach', 'gmail_edit'}:
                     raise ToolError('Choose an existing outreach run.')
                 details = self.service.details(run_id)
                 state = details['state']
                 observation['content'] = json.dumps({'run_id': run_id, 'status': details['status'],
                     'current_step': details['current_step'], 'goal': state['goal'], 'drafts': state['drafts'],
-                    'outcomes': state['outcomes'], 'awaiting_recipients': details['awaiting_recipients']}, ensure_ascii=False)[:12000]
+                    'outcomes': state['outcomes'], 'awaiting_recipients': details['awaiting_recipients'],
+                    'edit_status': details['draft_edit']['status'] if details.get('draft_edit') else None}, ensure_ascii=False)[:12000]
                 if details['awaiting_approval']:
                     observation['review_run_id'] = run_id
                 if details['awaiting_recipients']:
@@ -345,7 +356,22 @@ class ConversationService:
             sources = list(dict.fromkeys(s['ref'] for item in observations for s in item.get('sources', [])))[:8]
         text = action.text.strip() or 'What would you like to explore? You can send a question, website URL, or file.'
         result = {'text': text, 'evidence': [{**item, 'content': item.get('content', '')[:4000]} for item in observations[-2:]]}
-        if action.action == 'outreach':
+        if action.action == 'edit_draft':
+            snapshots = [item['draft_snapshot'] for item in observations if item.get('draft_snapshot', {}).get('snapshot_key')]
+            selected = [item for item in snapshots if not action.draft_id or item['draft']['draft_id'] == action.draft_id]
+            if len(selected) != 1:
+                result['text'] = 'Please tell me which Gmail draft you want to edit, so I can read it and show you the changes first.'
+            else:
+                result['edit_request'] = {'snapshot_key': selected[0]['snapshot_key'],
+                    'instruction': action.query.strip() or context.inputs['message']}
+                result['text'] = "I'll prepare the changes and show them to you for approval. Your saved Gmail draft will stay unchanged until you approve."
+        elif action.action == 'outreach':
+            from app.llm.tools import edit_request, research_request
+            if edit_request(context.inputs.get('message', '')) or research_request(context.inputs.get('message', '')):
+                # A model cannot turn a new research task or existing-email
+                # edit into a new Gmail draft simply by returning outreach.
+                result['text'] = 'I could not select the right tool for that request. Please try again; I have not created another email.'
+                return result
             try:
                 if action.request is None:
                     raise ValueError('Missing outreach request.')

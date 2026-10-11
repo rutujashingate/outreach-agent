@@ -20,11 +20,21 @@ flowchart TD
     reasoning --> reply
 ```
 
-`search` discovers pages with Brave. `read_page` uses the protected public browser. `read_file` reads an attached document's extracted text. `run_status` reads outreach progress. `research` asks the multi-agent model to analyze evidence those tools already collected. It does not search by itself. Supplied URLs and files work without Brave; discovering new websites requires the Brave key.
+`search` discovers pages through DuckDuckGo without a key, or Brave when its key is configured. The keyless provider may be rate-limited; a failure is reported rather than replaced with invented results. `read_page` uses the protected public browser. `read_file` reads an attached document's extracted text. `run_status` reads outreach progress. `read_gmail_draft` reads an existing draft by its recipient, subject, or latest tracked draft. `research` asks the multi-agent model to analyze evidence those tools already collected; it does not search by itself.
+
+The latest user message is a separate conversation turn, after saved history. A clear new work request reaches the reasoner even when the instruction model mistakenly answers an older email question. The first call for a fresh research command must search or read its supplied URL; an existing-email edit must first read Gmail. Only that required tool is advertised for this first call. Later calls can select other available tools. Simple greetings still use the instruction model alone.
 
 The reasoning model returns a native **function call**: a tool name, arguments, and a call identifier. Python checks the name and arguments, then applies file-access rules, public-network restrictions, cancellation, and budgets. The result is returned as `function_call_output` with that same identifier. Unknown tools, unexpected fields, multiple simultaneous calls, and tools requested after the limit are rejected. Credentials are never tool arguments. Neither sending email nor approving a draft is a conversation tool.
 
 The multi-agent model has no access to our custom functions. Its provider-hosted search and other paid tools are deliberately not enabled: gathering evidence remains inside our existing search/page limits. An analysis is labeled as an analysis, not a quotation from a website. Sources must match collected references, although matching references alone cannot prove every claim is true. Final draft creation stays in the explicit outreach workflow.
+
+## Existing Gmail draft edits
+
+“Edit the latest email draft and add a short introduction” reads the saved message, then uses 4.3 to write the complete revision and 4.20 to review it. The full proposed content appears in Telegram and **Run details → Proposed Gmail draft changes**, with before/after content in the dashboard. It waits for **Approve changes** or **Reject changes**. A chat reply such as “continue” cannot approve it.
+
+Approval identifies the specific edit request, connected account, draft ID, original content, proposed subject/body, version, and update action. The worker reads Gmail again before updating; a changed draft blocks the old proposal. The update uses the same draft ID and keeps its To/CC/BCC, attachments, reply headers, and thread. An update does not increase the count of newly created drafts. A lost Gmail confirmation blocks replay until inspection. HTML-only drafts, bodies over 50,000 characters, and raw messages over the read limit require editing in Gmail.
+
+The email body schema allows complete multiline text. xAI matches string patterns against the entire value, so the former `\S` pattern constrained output to one non-space character. The replacement explicitly allows surrounding text. Writing, review, and Gmail creation also reject single-character bodies and obvious placeholders. Automated review checks that the complete message fulfills the owner's instructions; human approval remains separate.
 
 ## Settings
 
@@ -45,11 +55,11 @@ Connections shows the configured roles. Saved `model_start`, `model_end`, and `m
 
 ## Verification
 
-`tests/test_model_routing.py` uses fake HTTP responses through the real graph. It checks all three role selections, native call/result pairs, researched citations, model usage events, and rejected tool requests. `tests/test_xai_client.py` retains single-model compatibility and provider-error checks. No real API calls are needed.
+`tests/test_model_routing.py` uses fake HTTP responses through the real graph. It checks all three role selections, native call/result pairs, researched citations, model usage events, and rejected tool requests. `tests/test_research_routing.py` checks a new research task overriding stale email context, required tools, complete email bodies, rejected fragments, explicit retry, and keyless discovery. `tests/test_gmail_draft_edits.py` checks native routing for draft reads/writing/review, shared approvals, preserved message parts, restart recovery, and concurrent PostgreSQL decisions. `tests/test_xai_client.py` retains single-model compatibility and provider-error checks. No real API calls are needed.
 
 These routes are owner-selected, not a claim that comparative quality evaluations proved them optimal. A live test still needs account credits and permission for all three models. The old optional measurement-based router remains available to evaluation code.
 
-Provider references: [function calling](https://docs.x.ai/developers/tools/function-calling), [multi-agent restrictions and agent counts](https://docs.x.ai/developers/model-capabilities/text/multi-agent), [4.3](https://docs.x.ai/developers/models/grok-4.3), [4.20 reasoning](https://docs.x.ai/developers/models/grok-4.20-0309-reasoning).
+Provider references: [structured output and whole-string patterns](https://docs.x.ai/developers/model-capabilities/text/structured-outputs), [Gmail draft lifecycle](https://developers.google.com/workspace/gmail/api/guides/drafts), [keyless search library](https://github.com/deedy5/ddgs), [function calling](https://docs.x.ai/developers/tools/function-calling), [multi-agent restrictions and agent counts](https://docs.x.ai/developers/model-capabilities/text/multi-agent), [4.3](https://docs.x.ai/developers/models/grok-4.3), [4.20 reasoning](https://docs.x.ai/developers/models/grok-4.20-0309-reasoning).
 
 ## Saved work and continuation
 

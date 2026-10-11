@@ -75,6 +75,10 @@ class XAIModelClient:
             "store": False,
             "stream": False,
         }
+        if response_model.__name__ == 'ConversationInstruction':
+            import json
+            from app.llm.tools import function_history
+            body['input'] = function_history(json.loads(input_text))
         if self._reasoning_effort is None:
             body.pop('reasoning')  # 4.20 reasoning uses the model's own setting.
         payload = await self.request(body)

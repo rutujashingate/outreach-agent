@@ -476,7 +476,7 @@ def test_followup_invalidates_proposal_before_it_finishes(make_run_manager):
                                       'request': {'goal': 'Find AI researchers'}}])
     service = AgentService(setup.manager)
     async def check():
-        job = service.conversations.queue('Find AI researchers', 'session', [], 'one')
+        job = service.conversations.queue('Plan outreach emails to AI researchers and wait for my approval', 'session', [], 'one')
         await service.execute_one()
         assert result(service, job).get('proposal')
         service.conversations.queue('Actually only researchers in Arizona', 'session', [], 'two')

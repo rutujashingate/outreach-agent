@@ -151,6 +151,9 @@ class ConnectedGmail:
     async def search_threads(self, email, limit=3): return await (await self._client()).search_threads(email, limit)
     async def read_thread(self, thread_id): return await (await self._client()).read_thread(thread_id)
     async def create_draft(self, sender, recipient, draft): return await (await self._client()).create_draft(sender, recipient, draft)
+    async def list_drafts(self, query='', limit=5): return await (await self._client()).list_drafts(query, limit)
+    async def read_draft(self, draft_id): return await (await self._client()).read_draft(draft_id)
+    async def update_draft(self, draft_id, baseline_hash, draft): return await (await self._client()).update_draft(draft_id, baseline_hash, draft)
     async def send(self, sender, recipient, draft):
         raise ToolError('Send manually from Gmail. This connector only creates drafts.')
 
@@ -170,5 +173,8 @@ class BoundGmail(ConnectedGmail):
     async def search_threads(self, email, limit=3): return await self._call('search_threads', email, limit)
     async def read_thread(self, thread_id): return await self._call('read_thread', thread_id)
     async def create_draft(self, sender, recipient, draft): return await self._call('create_draft', sender, recipient, draft)
+    async def list_drafts(self, query='', limit=5): return await self._call('list_drafts', query, limit)
+    async def read_draft(self, draft_id): return await self._call('read_draft', draft_id)
+    async def update_draft(self, draft_id, baseline_hash, draft): return await self._call('update_draft', draft_id, baseline_hash, draft)
     async def send(self, sender, recipient, draft):
         raise ToolError('Send manually from Gmail. This connector only creates drafts.')

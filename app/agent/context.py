@@ -13,6 +13,8 @@ from app.storage.control import ControlStore
 from app.llm.client import generate_structured
 from app.llm.client import ModelClient, ModelClientError, ModelProviderError, ModelResponseError
 from app.domain.workflow import MemoryFact, SearchResult
+from app.domain.schemas import EmailDraft
+from app.agent.components.writer import validate_email_content
 from app.storage.events import atrace as trace
 from app.services.limits import Limits
 from app.connectors.gmail.client import GmailTool
@@ -46,8 +48,16 @@ class ManagedModelClient:
                 json.dumps(response_model.model_json_schema(), sort_keys=True))
             saved = await asyncio.to_thread(self.store.get, key)
             if saved is not None:
-                await trace(self.repository, self.run_id, 'model_cache_hit', task=response_model.__name__)
-                return response_model.model_validate(saved)
+                result = response_model.model_validate(saved)
+                try:
+                    if isinstance(result, EmailDraft): validate_email_content(result)
+                except ModelResponseError:
+                    # An earlier incomplete body must not trap explicit retry
+                    # in a permanently reused bad result. Counters stay spent.
+                    await asyncio.to_thread(self.store.delete, key)
+                else:
+                    await trace(self.repository, self.run_id, 'model_cache_hit', task=response_model.__name__)
+                    return result
             if self.consecutive_failures >= 3:
                 raise ModelClientError("Model requests were stopped after repeated failures.")
             # Transport/server failures get one retry. Configuration failures,
@@ -63,6 +73,7 @@ class ManagedModelClient:
                         result = await generate_structured(client=self.client,
                             instructions=instructions, input_text=input_text, response_model=response_model,
                         )
+                    if isinstance(result, EmailDraft): validate_email_content(result)
                     # A node may process several prospects before checkpointing.
                     # Retain each validated answer so a later stop does not
                     # repeat the already completed, paid calls in that node.

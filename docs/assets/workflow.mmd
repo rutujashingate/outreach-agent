@@ -19,14 +19,20 @@ config:
     wrappingWidth: 380
 ---
 flowchart TD
-    accTitle: Requested outreach drafts with manual Gmail sending
-    accDescr: Telegram messages enter a saved queue. LangGraph answers questions and uses reading tools. Explicit email requests start drafting directly; a confirmation button is used only when the owner asks to wait. Known recipients go directly to writing preparation without prospect discovery or fit scoring. Finding new contacts follows research, qualification and address selection. Both paths retain relationship checks, writing, review and duplicate protection. The owner reviews, edits and sends in Gmail. SQLite or one Supabase PostgreSQL database holds saved state.
+    accTitle: Research, requested drafts, and approved existing-draft edits
+    accDescr: Telegram messages enter a saved queue. LangGraph answers questions and uses reading tools. Explicit email requests start drafting directly; a confirmation button is used only when the owner asks to wait. Known recipients go directly to writing preparation without prospect discovery or fit scoring. Finding new contacts follows research, qualification and address selection. Both paths retain relationship checks, writing, review and duplicate protection. Existing Gmail drafts are read, revised and reviewed, then updated at the same ID only after explicit owner approval. New website discovery uses keyless public search or optional Brave. The owner sends in Gmail. SQLite or one Supabase PostgreSQL database holds saved state.
     telegram["Private Telegram<br/>Normal messages, files and decisions"] --> service["Shared service<br/>Saved queue and one worker"]
     dashboard["Owner dashboard<br/>Connections and controls"] --> service
     service --> chat["LANGGRAPH CONVERSATION<br/>4.3 instructions · 4.20 reasoning/tools<br/>Saved request + step + collected evidence"]
-    chat -->|Read evidence| tools["Bounded read-only tools<br/>Files · browser · web / saved search · run status<br/>Multi-Agent evidence analysis when needed"]
+    chat -->|Read evidence| tools["Bounded read-only tools<br/>Files · browser · web / saved search · Gmail reads<br/>Multi-Agent evidence analysis when needed"]
     tools --> chat
     chat -->|Answer or clarify| answer["Reply in Telegram<br/>Continue the conversation"]
+    chat -->|Edit a saved email| readDraft["Read current Gmail draft<br/>Resolve matching subjects · preserve original"]
+    readDraft --> editDraft["4.3 writes the complete revision<br/>4.20 reviews · show proposed content"]
+    editDraft --> editApproval{"Owner approves changes?"}
+    editApproval -->|Reject| noChange["Leave Gmail unchanged"]
+    editApproval -->|Approve in Telegram or dashboard| updateDraft["Check account + original content + action history<br/>Update THE SAME draft · preserve recipients / attachments"]
+    updateDraft --> outcome
     chat -->|Email drafts requested| requested["Validate the owner's writing request"]
     requested -->|Start directly| kind{"Known recipient<br/>or find new contacts?"}
     requested -->|Only if owner asks to wait| proposal["Show proposal + wait for confirmation"]
@@ -35,7 +41,7 @@ flowchart TD
     kind -->|Find contacts| files["Optional uploaded files<br/>Read text / local OCR · save cited evidence"]
     service -->|Dashboard or guided outreach| files
     files --> goal["LANGGRAPH<br/>Interpret the goal"]
-    goal --> research["Research prospects + sources<br/>Files · notes · Brave · public browser<br/>4.20 Multi-Agent evidence analysis"]
+    goal --> research["Research prospects + sources<br/>Files · notes · keyless search / Brave · public browser<br/>4.20 Multi-Agent evidence analysis"]
     research --> qualification{"Qualified prospects?"}
     qualification -->|Yes| recipients["Resolve recipient addresses<br/>Published evidence or owner selection"]
     qualification -->|No| outcome["Save outcomes + relationship history"]
@@ -65,5 +71,5 @@ flowchart TD
     outcome -. Persist .-> store
     classDef decision fill:#fff6e6,stroke:#caa65d,color:#5b451b;
     classDef storage fill:#edf3fc,stroke:#8da6c7,color:#243b58;
-    class qualification,review,destination decision;
+    class qualification,review,destination,editApproval decision;
     class store,outcome,knowledge,originals storage;

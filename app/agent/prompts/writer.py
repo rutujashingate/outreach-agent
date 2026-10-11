@@ -7,6 +7,10 @@ invent experience, imply a relationship that does not exist, or pretend to
 know personal details. Keep hypotheses tentative. Use a clear request matching
 the strategy. If a previous draft and feedback are supplied, address the issues
 without adding unsupported claims. Return the same prospect ID.
+Return the complete finished body, including all requested content. Never
+return a single character, a placeholder, a description of what you would write,
+or only the changed fragment. For an existing-draft edit, return the entire
+revised email and preserve facts and wording outside the requested changes.
 When direct_email_brief is present, write the ordinary email requested in its
 goal. Respect any specified subject, wording, language, tone, and purpose. A
 test email should be a short test email, with no invented sales pitch, research,

@@ -154,7 +154,7 @@ class ApprovalRequest(Record):
 
 class Outcome(Record):
     prospect_id: NonEmptyText
-    status: Literal["approved", "drafted", "sent", "rejected", "manual_review", "blocked", "failed", "uncertain"]
+    status: Literal["approved", "drafted", "updated", "sent", "rejected", "manual_review", "blocked", "failed", "uncertain"]
     reason: str = ""
     source: NonEmptyText
     external_id: str | None = None

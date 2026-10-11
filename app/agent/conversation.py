@@ -17,6 +17,7 @@ from app.domain.conversation import ConversationAction, ConversationInstruction
 from app.llm.client import generate_structured
 from app.services.cancellation import acheck_cancelled as check_cancelled
 from app.agent.context import model_cache_scope
+from app.llm.tools import work_request
 
 
 class ConversationState(TypedDict):
@@ -58,7 +59,7 @@ async def decide(state: ConversationState, runtime: Runtime[ConversationContext]
                                'tools_allowed': tools_allowed}, ensure_ascii=False),
     )
     # A model instruction alone is not a limit. Stop tool requests in code too.
-    if not tools_allowed and action.action not in {'reply', 'outreach'}:
+    if not tools_allowed and action.action not in {'reply', 'outreach', 'edit_draft'}:
         action = ConversationAction(action='reply', text=(
             'I reached the reading limit for this message. Please narrow the question '
             'or ask me to continue with a specific source.'))
@@ -116,9 +117,10 @@ def build_conversation_graph(checkpointer):
     builder.add_node('answer', observed('answer', answer))
     builder.add_edge(START, 'understand')
     builder.add_conditional_edges('understand', lambda state:
-        'answer' if state.get('instruction', {}).get('action') in {'reply', 'outreach'} else 'decide')
+        'answer' if state.get('instruction', {}).get('action') in {'reply', 'outreach', 'edit_draft'}
+        and not work_request(state['inputs']['message']) else 'decide')
     builder.add_conditional_edges('decide', lambda state:
-        'answer' if state['action']['action'] in {'reply', 'outreach'} else 'read_tool')
+        'answer' if state['action']['action'] in {'reply', 'outreach', 'edit_draft'} else 'read_tool')
     builder.add_edge('read_tool', 'decide')
     builder.add_edge('answer', END)
     return builder.compile(checkpointer=checkpointer)

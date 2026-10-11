@@ -522,7 +522,7 @@ function renderConnections(c) {
         "↗",
         "Research tools",
         c.browser.available ? "connected" : "unavailable",
-        `Browser: ${c.browser.available ? "ready" : "Chromium not available"}. Brave search: ${c.search.configured ? "configured" : "not configured"}.`,
+        `Browser: ${c.browser.available ? "ready" : "Chromium not available"}. Web search: ${c.search.configured ? (c.search.provider === "brave" ? "Brave" : "DuckDuckGo (no key needed)") : "unavailable"}.`,
       ),
     ),
     card(
@@ -710,6 +710,26 @@ function renderDetail(data) {
       ),
     );
   if (data.awaiting_recipients) cards.push(recipientForm(state));
+  if (data.draft_edit) {
+    const edit = data.draft_edit;
+    const decide = async (action) => {
+      await post(`/api/runs/${runId}/gmail-edit`, {fingerprint: edit.fingerprint, action});
+      await refresh();
+    };
+    cards.push(panel("Proposed Gmail draft changes",
+      node("p", {}, `From: ${edit.before.sender}`),
+      node("p", {}, `To: ${edit.before.to.join(", ")}`),
+      edit.before.cc.length ? node("p", {}, `CC: ${edit.before.cc.join(", ")}`) : null,
+      edit.before.bcc.length ? node("p", {}, `BCC: ${edit.before.bcc.join(", ")}`) : null,
+      node("p", {}, `Attachments retained: ${edit.before.attachment_count}`),
+      node("h3", {}, `Before: ${edit.before.subject}`), node("pre", {}, edit.before.body),
+      node("h3", {}, `After: ${edit.draft.subject}`), node("pre", {}, edit.draft.body),
+      node("p", {}, "Approval updates this same Gmail draft. Nothing is sent."),
+      edit.status === "pending" && data.status === "paused"
+        ? node("div", {class: "actions"}, button("Approve changes", () => decide("approve")), button("Reject changes", () => decide("reject")))
+        : node("p", {}, `Decision: ${edit.status}`)
+    ));
+  }
   for (const item of state.approval_requests) {
     if (!data.awaiting_approval) break;
     const choice = data.choices[item.prospect.id];

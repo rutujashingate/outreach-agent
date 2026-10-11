@@ -30,6 +30,7 @@ dependencies = [
     "pypdfium2>=4.30,<6",  # Read PDF text and render scanned pages locally.
     "Pillow>=11,<13",  # Decode and normalize images before local OCR.
     "python-dotenv>=1,<2",  # Load local settings at service startup.
+    "ddgs>=9,<10",  # Public web search without a paid search API key.
 ]
 
 # Start the service; users interact through Telegram or the dashboard.

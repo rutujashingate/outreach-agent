@@ -9,7 +9,7 @@ import os
 
 from app.domain.conversation import ConversationAction
 from app.llm.client import ModelResponseError
-from app.llm.tools import checked_call, function_history, tool_definitions
+from app.llm.tools import checked_call, function_history, tool_definitions, research_request, edit_request
 from app.llm.xai_client import XAIModelClient
 
 DEFAULT_INSTRUCTION_MODEL = 'grok-4.3'
@@ -70,16 +70,25 @@ class XAITaskRouter:
     async def _select_tool(self, client, instructions, input_text):
         inputs = json.loads(input_text)
         definitions = tool_definitions(inputs)
+        # A clear fresh research command cannot be answered from old email
+        # context. Its first native call must gather current evidence.
+        editing = edit_request(inputs.get('message', ''))
+        first_research = (research_request(inputs.get('message', '')) or editing) and not inputs.get('observations')
+        required = 'read_gmail_draft' if editing else ('read_page' if 'http' in inputs.get('message', '') else 'search')
+        if first_research and any(item['name'] == required for item in definitions):
+            definitions = [item for item in definitions if item['name'] == required]
+        else:
+            first_research = False
         body = {
             'model': client.model_name, 'instructions': instructions +
-                '\nUse a function call for reading or research. For a final reply or outreach proposal, return the requested JSON record. Never put a tool request in the final JSON.',
+                '\nUse a function call for reading or research. For a final reply, outreach proposal, or draft-edit proposal, return the requested JSON record. Never put a tool request in the final JSON.',
             'input': function_history(inputs),
             'text': {'format': {'type': 'json_schema', 'name': 'ConversationAction',
                                'schema': ConversationAction.model_json_schema(), 'strict': True}},
             'max_output_tokens': self.max_output_tokens, 'store': False, 'stream': False,
         }
         if definitions:
-            body.update(tools=definitions, tool_choice='auto', parallel_tool_calls=False)
+            body.update(tools=definitions, tool_choice='required' if first_research else 'auto', parallel_tool_calls=False)
         payload = await client.request(body)
         calls = [item for item in payload['output'] if isinstance(item, dict) and item.get('type') == 'function_call']
         if calls:
@@ -89,8 +98,10 @@ class XAITaskRouter:
             if any(item.get('function_call', {}).get('call_id') == action.call_id for item in inputs.get('observations', [])):
                 raise ModelResponseError('The provider reused an earlier tool call identifier.')
             return action
+        if first_research:
+            raise ModelResponseError('The requested research or draft edit requires a reading tool first.')
         action = client.parse_structured(payload, ConversationAction)
-        if action.action not in {'reply', 'outreach'} or action.call_id:
+        if action.action not in {'reply', 'outreach', 'edit_draft'} or action.call_id:
             raise ModelResponseError('Tool requests must use the function-calling interface.')
         return action
 

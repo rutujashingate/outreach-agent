@@ -31,6 +31,12 @@ class QueueSetting(BaseModel):
     paused: bool = Field(strict=True)
 
 
+class GmailEditDecision(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    fingerprint: str = Field(min_length=64, max_length=64, pattern=r'^[a-f0-9]+$')
+    action: str = Field(pattern=r'^(approve|reject)$')
+
+
 class DemoMessage(BaseModel):
     model_config = ConfigDict(extra='forbid')
     text: str = Field(default='', max_length=10000)
@@ -49,7 +55,8 @@ def connections(request):
                         'files': service(request).documents.files.backend,
                         'validation': service(request).store.get('storage:validation')},
             'knowledge': service(request).knowledge.status(),
-            'browser': {'available': manager.browser is not None}, 'search': {'configured': manager.search is not None},
+            'browser': {'available': manager.browser is not None}, 'search': {'configured': manager.search is not None,
+                'provider': getattr(manager.search, 'provider', 'fake' if settings.demo else None)},
             'documents': service(request).documents.status(),
             'model': {'provider': settings.model_provider, 'configured': settings.demo or bool(os.getenv(model_key, '').strip())}, 'demo': settings.demo,
             'model_routes': configured_models() if settings.model_provider == 'xai' and settings.xai_task_routing and not settings.demo else {},
@@ -75,6 +82,11 @@ async def start_run(request: Request, body: WorkflowRequest, idempotency_key: An
 @router.get('/runs/{run_id}')
 def run_details(request: Request, run_id: str, event_page: int = Query(1, ge=1)):
     return service(request).details(run_id, event_page=event_page)
+
+
+@router.post('/runs/{run_id}/gmail-edit', status_code=202)
+def gmail_edit_decision(request: Request, run_id: str, body: GmailEditDecision):
+    return service(request).draft_edits.decide(run_id, body.fingerprint, body.action)
 
 
 @router.post('/runs/{run_id}/choices')

@@ -21,4 +21,12 @@ async def write_draft(prospect: Prospect, strategy: OutreachStrategy, memories: 
         raise ModelResponseError("Writer referred to the wrong prospect.")
     if "\n" in result.subject or "\r" in result.subject:
         raise ModelResponseError("Email subjects must not contain line breaks.")
+    validate_email_content(result)
     return result
+
+
+def validate_email_content(draft):
+    """Reject fragments and placeholders even if a model's JSON is valid."""
+    body = draft.body.strip()
+    if sum(character.isalnum() for character in body) < 2 or body.casefold() in {'todo', 'tbd', '[body]', '[email body]'}:
+        raise ModelResponseError('The email body is incomplete or contains only a placeholder.')

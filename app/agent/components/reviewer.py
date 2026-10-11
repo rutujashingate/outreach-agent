@@ -6,10 +6,12 @@ from app.llm.client import ModelClient, ModelResponseError, generate_structured
 from app.domain.schemas import EmailDraft, OutreachStrategy, Prospect, ReviewResult
 from app.domain.workflow import MemoryFact, Sender
 from app.agent.prompts.reviewer import REVIEW_INSTRUCTIONS
+from app.agent.components.writer import validate_email_content
 
 
 async def review_draft(prospect: Prospect, strategy: OutreachStrategy, memories: list[MemoryFact],
                        sender: Sender, draft: EmailDraft, client: ModelClient, *, brief: dict | None = None) -> ReviewResult:
+    validate_email_content(draft)
     result = await generate_structured(instructions=REVIEW_INSTRUCTIONS, input_text=json.dumps({
         "research": prospect.model_dump(), "strategy": strategy.model_dump(),
         "memories": [fact.model_dump(mode="json") for fact in memories], "sender": sender.model_dump(),

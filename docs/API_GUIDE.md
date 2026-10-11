@@ -41,13 +41,14 @@ Use a stable `Idempotency-Key` header for each intended queued action. Repeating
 | `PUT /api/profile` | Save sender `name`, optional `email`, and `context` for new Telegram/dashboard requests. |
 | `POST /api/replies/check` | Queue an on-demand check; returns 202 with a job ID and no outreach run ID. |
 | `GET /api/connectors` | Gmail account status, Telegram health, browser availability, model/search configuration presence, document/OCR availability, sender profile, and storage backend/checkpoint mode. No tokens or database URLs. |
+| `POST /api/runs/{run_id}/gmail-edit` | Approve/reject the exact proposed update of an existing Gmail draft; requires its current fingerprint. |
 | `POST /api/connectors/gmail/connect` | Return the Google consent URL for the logged-in browser session. |
 | `GET /api/connectors/gmail/callback` | Google’s registered redirect; validates the one-use state and owner session, then returns to the dashboard. |
 | `POST /api/connectors/gmail/disconnect` | Remove encrypted local credentials and attempt revocation at Google. |
 
 The retired `/outreach`, `/runs`, interactive CLI, and public OpenAPI docs are not entry points in this application.
 
-Run details include `saved_progress` when available: `next_steps` names saved graph steps, and chat also reports `completed_tools`. Chat has a separate checkpoint thread (`chat:RUN_ID`) in the configured database. Continuing uses the original inputs rather than a new goal. Connector status includes non-secret `model_routes` when xAI routing is active.
+Run details include `saved_progress` when available: `next_steps` names saved graph steps, and chat also reports `completed_tools`. Chat has a separate checkpoint thread (`chat:RUN_ID`) in the configured database. Continuing uses the original inputs rather than a new goal. Connector status includes non-secret `model_routes` when xAI routing is active and `search.provider` (`duckduckgo` by default, or `brave`).
 
 Connector status also reports the original-file backend, source/index counts, local embedding configuration, and the latest storage validation. Search results retain source type, background/research purpose, page/URL, saved date, and source-content hash. Rank scores order candidates; they are not probabilities. Search and validation use no Grok or Gmail calls. A paused queue also pauses validation and indexing jobs.
 
@@ -87,7 +88,7 @@ For an ordinary email to a known recipient, set `draft_mode: "direct"`:
 
 Direct requests require at least one recipient, respect `max_qualified` as the draft batch limit, and use no search, browser, seed URLs, or email discovery flags. They skip prospect discovery/fit scoring and reuse writing, review, memory, opt-out checks, and the Gmail action ledger. Cold-outreach timing checks do not block these explicitly requested ordinary drafts. `draft_mode` defaults to `outreach`, preserving existing requests and checkpoints. The dashboard's current New run form still starts research outreach; direct drafting is available through normal Telegram conversation and this API.
 
-The trimmed goal must contain 1–2,000 characters. Booleans must be real JSON booleans, fields must be recognized, notes are bounded to 100,000 characters, and seed URLs to five. Invalid input returns 422, including `gmail_action: "send"`. A configured browser is required for `use_browser`; a Brave key for `use_search`. Requested Gmail drafts are saved after automated review and contact checks. The owner reviews and sends them manually in Gmail; no configuration flag enables agent sending.
+The trimmed goal must contain 1–2,000 characters. Booleans must be real JSON booleans, fields must be recognized, notes are bounded to 100,000 characters, and seed URLs to five. Invalid input returns 422, including `gmail_action: "send"`. A configured browser is required for `use_browser`; the default keyless search adapter or configured Brave for `use_search`. Requested Gmail drafts are saved after automated review and contact checks. The owner reviews and sends them manually in Gmail; no configuration flag enables agent sending.
 
 ## Upload and attach files
 
@@ -161,6 +162,20 @@ For a run with `awaiting_recipients: true`, resolve every ID in `state.recipient
 Run status is `queued`, `running`, `paused`, `completed`, `failed`, or `cancelled`. `current_step` in details reports the active node while running, and the saved step otherwise. `state.current_step` is the durable completed/paused snapshot. Outcomes distinguish approved-only, drafted, sent, rejected, blocked, failed, manual-review, and uncertain results. A completed run can contain blocked or failed prospects; inspect each outcome.
 
 401 means authentication is needed; 403 means a browser request failed its origin/token check; 404 means an unknown run/route; 409 means conflicting or stale work; 422 means invalid input; 429 means a request/budget limit; 502/503 means a connector/configuration problem. Job errors retain a generic error type; inspect per-run events and Connections for context.
+
+Existing Gmail draft edits appear as runs with metadata kind `gmail_edit`. Run details include `draft_edit`: the proposed subject/body, original content under `before`, approval status, and fingerprint. Raw MIME and tokens are excluded. The conversation must first read that existing draft; a requested edit queues preparation, not a Gmail write.
+
+Approve or reject the saved preview using the fingerprint returned in those details:
+
+```http
+POST /api/runs/RUN_ID/gmail-edit
+Content-Type: application/json
+X-CSRF-Token: YOUR_SESSION_CSRF_TOKEN
+
+{"fingerprint":"FINGERPRINT_FROM_RUN_DETAILS","action":"approve"}
+```
+
+The fingerprint must be the returned 64-character hexadecimal value; `action` accepts `approve` or `reject`. Approval returns `202` with the existing or newly queued job ID. Rejection returns `202` and records rejection without an external write. Repeated approvals share the same job. A stale decision returns `409`. The worker checks the connected account, recipient policy, original message hash, and action ledger before updating the same Gmail draft ID. A manual Gmail change blocks the preview. Telegram and the dashboard use this same saved decision. Saying “continue” is not approval.
 
 An uncertain Gmail result is not automatically retryable. The action ledger and contact lock remain in place. Inspect Gmail manually before any maintenance resolution. Statistics count **drafts** only after a confirmed Gmail draft response. `sent` retains historical agent-send records, if present; new agent sends are blocked. Manual Gmail sends are not automatically reconciled into that counter.
 

@@ -11,10 +11,11 @@ A conversational Telegram assistant for questions, file reading, public-web rese
 
 - Answers normal Telegram messages, remembers recent conversation, and chooses read-only tools when needed. `/new` is an optional reset; `/guided` opens step-by-step outreach setup.
 - Reads uploaded PDFs, scanned pages, images, Word/OpenDocument files, and text. Uses relevant content to guide research, with filename/page references.
-- Researches public websites and optional Brave results; retains sources and published email evidence.
+- Searches the web without a key using DuckDuckGo, or uses Brave when configured. Reads public websites and retains sources and published email evidence.
 - Searches saved documents and website evidence across conversations by meaning and keywords, with local embeddings and cited passages. The dashboard exposes the library and live storage checks. [Supabase and search setup](docs/SUPABASE.md).
 - Routes instruction following to Grok 4.3, reasoning/tool selection to Grok 4.20, and evidence analysis to 4.20 Multi-Agent. [Models and tools](docs/MODELS_AND_TOOLS.md).
 - Drafts ordinary emails to recipients you already know, or researches and qualifies new contacts for outreach. Both paths review the writing and protect Gmail actions against duplicates.
+- Reads existing Gmail drafts, shows proposed changes, and updates the same draft only after your approval in Telegram or the dashboard.
 - Uses friendly Telegram replies, asks for missing details, and shows only **Queued…**, **Researching…**, or **Typing…** while working. Detailed progress and diagnostics stay in the dashboard. App-only drafts retain review controls.
 - Saves progress across restarts. Say **stop** to pause a task and **continue** to resume it with retained evidence and usage limits.
 - Connects one Gmail account with encrypted, renewable credentials. The agent cannot send emails.
@@ -24,7 +25,7 @@ A conversational Telegram assistant for questions, file reading, public-web rese
 
 ![Telegram questions use reading tools; explicit email requests produce Gmail drafts for the owner to review and send, with persistent state](docs/assets/workflow.svg)
 
-One saved queue serves conversation and outreach. Clear requests to research, read files, or create drafts start directly. The bot asks for confirmation before starting only when you request it. Ordinary searches and file questions do not create emails. Sending stays manual in Gmail; uncertain Gmail writes remain blocked for inspection.
+One saved queue serves conversation and outreach. Clear requests to research, read files, or create new drafts start directly. Ask “Edit my latest email draft and add a short introduction” to receive an edit preview; approve it to update that existing draft. Ordinary searches and file questions do not create emails. Sending stays manual in Gmail; uncertain Gmail writes remain blocked for inspection.
 
 ## Try it locally
 

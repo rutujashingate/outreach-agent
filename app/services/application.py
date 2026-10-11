@@ -13,7 +13,7 @@ from app.domain.workflow import ApprovalDecision, ApprovalSubmission, WorkflowRe
 from app.agent.nodes.approval import validate_decisions
 from app.llm.client import ModelProviderError
 from app.services.limits import LimitExceeded
-from app.services.cancellation import RunStopped
+from app.services.cancellation import RunStopped, RunCancelled
 from app.services.background import run_loop
 from app.services.presentation import run_summary
 from app.services.runs import RunConflict, RunNotFound
@@ -34,6 +34,8 @@ class AgentService:
         self.documents = DocumentService(manager.repository.engine, manager.settings, files, self.knowledge)
         from app.services.conversation import ConversationService
         self.conversations = ConversationService(self)
+        from app.services.draft_edits import DraftEdits
+        self.draft_edits = DraftEdits(self)
         self.stopping = asyncio.Event()
         self.worker_busy = False
         self.background_health = {}
@@ -115,7 +117,9 @@ class AgentService:
         if row is None: raise RunNotFound("Unknown run.")
         if row["status"] not in {'failed', 'stopped'}: raise RunConflict("Only failed, interrupted, or stopped runs can be retried.")
         if self.store.cancellation_requested(run_id): raise RunConflict("Cancelled runs cannot be retried.")
-        if (self.store.metadata(run_id) or {}).get('kind') == 'chat':
+        if (self.store.metadata(run_id) or {}).get('kind') == 'gmail_edit':
+            job = self.draft_edits.retry(run_id, key)
+        elif (self.store.metadata(run_id) or {}).get('kind') == 'chat':
             payload = self.conversations.retry_payload(run_id)
             job = self.store.enqueue('chat', run_id, payload, key)
             # Explicitly returning to this task makes its eventual proposal
@@ -207,6 +211,11 @@ class AgentService:
                 if status == 'stopped':
                     await asyncio.to_thread(self._notify, job['id'], "I've stopped and saved your progress. Say continue when you're ready.")
                 return True
+            if kind in {'draft_edit_prepare', 'draft_edit_apply'}:
+                handler = self.draft_edits.prepare if kind == 'draft_edit_prepare' else self.draft_edits.apply
+                status = await handler(job)
+                await asyncio.to_thread(self.store.finish_job, job['id'], status)
+                return True
             if kind == "start": result = await self.manager.execute_new(run_id)
             elif kind == "decisions": result = await self.manager.resume(run_id, ApprovalSubmission.model_validate(job["payload"]))
             elif kind == "recipients": result = await self.manager.select_recipients(run_id, job["payload"])
@@ -241,6 +250,13 @@ class AgentService:
             elif result and result.awaiting_recipients:
                 entries = [('Choose email addresses', {'recipient_run': run_id})]
             await asyncio.to_thread(self._notify, job["id"], message, entries)
+        except RunCancelled:
+            status = 'cancelled'
+            state = self.state(job['run_id']).state
+            state.current_step = 'cancelled'
+            self.manager.repository.save_run(state, 'cancelled')
+            self.store.finish_job(job['id'], 'cancelled')
+            self._notify(job['id'], 'Your request has been cancelled.')
         except RunStopped:
             status = 'stopped'
             state = self.state(job['run_id']).state
@@ -263,6 +279,10 @@ class AgentService:
             else:
                 explanation = "Work could not complete. Inspect the run and connector status in the dashboard."
             self.store.finish_job(job["id"], "failed", f"{type(error).__name__}: {explanation}")
+            if job['kind'] in {'draft_edit_prepare', 'draft_edit_apply'}:
+                state = self.state(job['run_id']).state
+                state.current_step = 'failed'
+                self.manager.repository.save_run(state, 'failed', explanation)
             entries = [('Try again', {'retry_task': job['run_id'], 'failed_job': job['id']})] if job['run_id'] else []
             self._notify(job['id'], f"I couldn't finish that request. {explanation}", entries)
         finally:
@@ -282,7 +302,7 @@ class AgentService:
     def list_runs(self, *, page=1, limit=20):
         if page < 1 or not 1 <= limit <= 100: raise ValueError("Invalid pagination.")
         with Session(self.store.engine) as session:
-            query = select(RunRow, RunMeta).join(RunMeta, RunMeta.run_id == RunRow.id).where(RunMeta.kind == "outreach")
+            query = select(RunRow, RunMeta).join(RunMeta, RunMeta.run_id == RunRow.id).where(RunMeta.kind.in_(['outreach', 'gmail_edit']))
             total = session.scalar(select(func.count()).select_from(query.subquery()))
             rows = session.execute(query.order_by(RunMeta.created_at.desc(), RunMeta.run_id).offset((page-1)*limit).limit(limit))
             return {"total": total, "page": page, "items": [{"run_id": run.id, "goal": run.payload["goal"],
@@ -302,7 +322,7 @@ class AgentService:
                 "current_step": self.current_step(run_id, response.state.current_step, record['status']),
                 "usage": {k: record[k] for k in ("model_calls", "search_calls", "estimated_cost")},
                 "attached_documents": [{k:v for k,v in self.documents.get(item.document_id).items() if k != 'content'} for item in response.state.attachments],
-                "choices": self.choices(run_id), "events": events, "event_total": total, "event_page": event_page}
+                "choices": self.choices(run_id), "draft_edit": self.draft_edits.public(run_id), "events": events, "event_total": total, "event_page": event_page}
 
     def overview(self):
         with Session(self.store.engine) as session:
@@ -316,13 +336,13 @@ class AgentService:
                 stats["search_calls"] += row.search_calls
                 stats["browser_pages"] += meta.browser_calls
                 stats["estimated_cost"] += row.estimated_cost
-                if meta.kind != "outreach": continue
+                if meta.kind not in {'outreach', 'gmail_edit'}: continue
                 stats["runs"] += 1
                 if row.status in stats: stats[row.status] += 1
                 stats["prospects"] += len(row.payload.get("prospects", []))
                 if row.payload.get('draft_mode', 'outreach') != 'direct':
                     stats["qualified"] += len(row.payload.get("qualified_prospects", []))
-                if row.status == "paused": stats["pending_approvals"] += len(row.payload.get("approval_requests", []))
+                if row.status == "paused": stats["pending_approvals"] += len(row.payload.get("approval_requests", [])) or (1 if meta.kind == 'gmail_edit' else 0)
             for action in session.scalars(select(ActionRow).where(ActionRow.status == "done")):
                 if action.kind == "send": stats["sent"] += 1
                 elif action.kind == "draft": stats["drafts"] += 1

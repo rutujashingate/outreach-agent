@@ -47,6 +47,13 @@ class TelegramBot:
         self.say('Where should I save the drafts you requested? You will review and send Gmail drafts yourself.', entries)
 
     def _review(self, run_id):
+        if (self.store.metadata(run_id) or {}).get('kind') == 'gmail_edit':
+            proposal = self.service.draft_edits.proposal(run_id)
+            if proposal and proposal['status'] == 'pending':
+                self.say(self.service.draft_edits.preview(proposal), self.service.draft_edits.entries(run_id))
+            else:
+                self.say('These proposed changes are no longer waiting for approval. Check the latest result in the dashboard.')
+            return
         response = self.service.state(run_id)
         state = response.state
         if response.awaiting_recipients:
@@ -132,7 +139,12 @@ class TelegramBot:
         return True
 
     def _callback(self, value, conversation):
-        if 'chat_proposal' in value:
+        if 'gmail_edit' in value:
+            result = self.service.draft_edits.decide(value['gmail_edit'], value['fingerprint'], value['edit_decision'])
+            messages = {'approved': "I'll update that same Gmail draft.", 'updated': 'Those changes are already saved.',
+                        'rejected': 'Changes rejected. Your Gmail draft is unchanged.'}
+            self.say(messages.get(result['status'], 'That decision is already recorded. Please check the result in the dashboard.'))
+        elif 'chat_proposal' in value:
             if conversation.get('id') != value['conversation']:
                 raise RunConflict('This proposal belongs to an earlier conversation. Ask for a new one.')
             job = self.service.conversations.start_proposal(value['chat_proposal'], value['conversation'])
