@@ -103,14 +103,14 @@ def create_app(*, settings=None, manager=None, background=True):
         return JSONResponse({'status': 'ok' if healthy else 'degraded'}, status_code=200 if healthy else 503)
 
     @application.post('/auth/login')
-    async def login(body: Login, request: Request):
+    def login(body: Login, request: Request):
         token, csrf = application.state.auth.login(body.password, request.client.host if request.client else 'local')
         response = JSONResponse({'csrf': csrf, 'demo': configured.demo})
         response.set_cookie('outreach_session', token, httponly=True, secure=configured.app_url.startswith('https://'), samesite='lax', max_age=43200)
         return response
 
     @application.get('/auth/session')
-    async def session(request: Request):
+    def session(request: Request):
         _, saved = application.state.auth.session(request)
         return {'csrf': saved['csrf'], 'demo': configured.demo}
 
@@ -143,8 +143,12 @@ def main():
     args = parser.parse_args()
     settings = Settings.from_env()
     if args.demo or settings.demo:
+        # A cloud-configured .env must never make the fictional demo write to
+        # the owner's real database or private document bucket.
         settings = settings.model_copy(update={'demo': True, 'data_dir': settings.data_dir / 'demo', 'database_url': None, 'supabase_database_url': None,
-            'checkpoint_backend': 'sqlite', 'telegram_token': '', 'telegram_owner_id': 1, 'owner_password': settings.owner_password or 'demo'})
+            'supabase_url': '', 'supabase_secret_key': '', 'document_storage': 'local', 'semantic_search_enabled': False,
+            'checkpoint_backend': 'sqlite', 'checkpoint_postgres_url': None,
+            'telegram_token': '', 'telegram_owner_id': 1, 'owner_password': settings.owner_password or 'demo'})
     import os
     uvicorn.run(create_app(settings=settings), host=os.getenv('OUTREACH_HOST', '127.0.0.1'), port=int(os.getenv('OUTREACH_PORT', '8000')),
                 access_log=False, timeout_graceful_shutdown=30)

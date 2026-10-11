@@ -1,5 +1,20 @@
 # Local validation
 
+## Hosted Supabase connection and dashboard responsiveness — October 10, 2026
+
+- The owner supplied credentials privately. Corrected the password's URL encoding without changing the database password, stopped the idle local service, backed up its SQLite files under `.data/backups`, and enabled Supabase originals and semantic search. The three failed local test jobs remain in the archive; old runs and Google tokens were not imported.
+- Hosted setup created the private `outreach` schema, application/checkpoint tables, pgvector indexes, and private `outreach-documents` bucket. Database, checkpoint, original-file, private-access, semantic-retrieval, and cleanup checks all passed against the actual project using the real local embedding model.
+- Read-only inspection found **20 application/checkpoint tables**, all with row-level security enabled, pgvector in `extensions`, both knowledge-search indexes, and no remaining validation sources, checkpoints, or temporary database records.
+- One dashboard-triggered check reported a file round-trip failure. An isolated write/read/delete and a repeated worker validation passed. Synchronous dashboard/database reads and browser-session lookup now run in background threads so cloud latency cannot block the main request loop. The original failure was reported rather than silently treated as a pass.
+- Demo mode now clears cloud database/file credentials and uses local originals and checkpoints. This prevents a demo launched beside a cloud-configured `.env` from uploading fictional files to the real bucket.
+- **497 tests passed** with `RUN_POSTGRES_TESTS=1 RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/pytest -o addopts='' -q --tb=short`. Three new checks cover demo isolation and health requests completing while a dashboard read or session lookup is deliberately paused. Package dependency, JavaScript syntax, and Git whitespace checks passed.
+- The service restarted on the hosted database, and its passed validation report survived another restart. Health returned `ok`, Telegram reported connected, and the previous queue setting was restored. No paid model inference or real Gmail draft/email was requested.
+- A real Chromium walkthrough signed in to the live dashboard, opened Connections, queued storage validation while the view refreshed, confirmed all six hosted checks passed, and opened Saved knowledge. The final Connections screen was visually inspected. This used the owner's actual Supabase project and real local embeddings; it did not call the language model or Gmail.
+
+**Owner checks remaining:** reconnect Gmail in this fresh cloud store, verify actual xAI model access, and test a requested draft through Telegram. Database connectivity does not establish provider credits or live answer quality. Docker execution and remote hosting remain unverified.
+
+The entries below preserve what was verified before hosted credentials were added.
+
 ## Private originals, pgvector retrieval, and storage checks — October 10, 2026
 
 - **494 tests passed** with `RUN_POSTGRES_TESTS=1 RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/pytest -o addopts='' -q --tb=short`. These include real local PostgreSQL/pgvector, Chromium, and OCR checks. Hosted Supabase requests use simulated HTTP responses; no cloud credentials are required for the suite.

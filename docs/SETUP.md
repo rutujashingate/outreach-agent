@@ -13,7 +13,7 @@ python -m app.main --demo
 
 Open **http://127.0.0.1:8000**. The password is `demo` unless `OUTREACH_OWNER_PASSWORD` is already configured. Choose **New run**, keep the example values, and start. The outcome and overview will show one simulated Gmail draft after automated review. Inspect its saved content; no real messages are sent.
 
-Demo data persists under `.data/demo`, even with Supabase configured. Repeating the same draft action can be blocked by duplicate protection; use another isolated `OUTREACH_DATA_DIR` for a completely fresh demonstration. Stop the service with Ctrl+C before starting another instance on the same port.
+Demo data persists under `.data/demo`, even with Supabase configured. Demo mode uses local files and SQLite, clears cloud-storage credentials, and disables the semantic library; it cannot upload fictional files to your real bucket. Repeating the same draft action can be blocked by duplicate protection; use another isolated `OUTREACH_DATA_DIR` for a completely fresh demonstration. Stop the service with Ctrl+C before starting another instance on the same port.
 
 The demo does not connect to a real Telegram bot. Automated tests run the complete guided conversation through `FakeTelegram`; the authenticated demo endpoint in the [API guide](API_GUIDE.md) also exposes it locally.
 

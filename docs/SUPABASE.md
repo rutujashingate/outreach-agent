@@ -12,13 +12,15 @@ Find these three values:
 
 | Local setting | Where to find it | Purpose |
 |---|---|---|
-| `OUTREACH_SUPABASE_DATABASE_URL` | **Connect → Session pooler**, port **5432** | One SQL connection string for application records and LangGraph checkpoints. Replace the password placeholder locally. |
+| `OUTREACH_SUPABASE_DATABASE_URL` | **Connect → Direct — Connection string → Session pooler**, port **5432** | One SQL connection string for application records and LangGraph checkpoints. Replace the password placeholder locally. |
 | `OUTREACH_SUPABASE_URL` | Project **Connect** panel or API settings | Project HTTPS address, such as `https://PROJECT_REF.supabase.co`. |
 | `OUTREACH_SUPABASE_SECRET_KEY` | **Settings → API Keys → Secret keys** | Server-only `sb_secret_…` key for managing private originals. |
 
 Paste real values only into `.env`, never chat or `.env.example`. The Supabase secret key is different from `OUTREACH_SECRET_KEY`, which encrypts Gmail credentials. Retain your existing Gmail encryption key.
 
-Copy the exact pooler hostname and username shown by Supabase. Password characters such as `@`, `/`, `#`, and `:` need percent encoding inside the connection string. Remote SQL connections require SSL. Session mode retains the schema selection and advisory lock used by this application; transaction mode on port 6543 is unsupported. [Connection documentation](https://supabase.com/docs/guides/database/connecting-to-postgres).
+The **Framework** tab shows the HTTPS project URL. Select **Direct — Connection string** to find the PostgreSQL URL, which starts with `postgresql://`. Choose the **Session pooler** method inside that tab and copy its exact hostname and username. A direct PostgreSQL connection also works when your network supports its address; session pooling is the recommended choice for IPv4 compatibility.
+
+Password characters such as `@`, `/`, `#`, and `:` need percent encoding inside the connection string. For example, a literal `@` in the password becomes `%40`; keep the `@` separating the password from the database hostname unchanged. Encode only the password portion, without changing your actual database password. Remote SQL connections require SSL. Direct and session connections retain the schema selection and advisory lock used by this application; transaction mode on port 6543 is unsupported. [Connection documentation](https://supabase.com/docs/guides/database/connecting-to-postgres).
 
 ## 2. Install and provision
 

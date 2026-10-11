@@ -20,6 +20,29 @@ def test_second_service_cannot_use_the_same_directory(tmp_path):
     with instance_lock(tmp_path): pass
 
 
+def test_demo_start_uses_local_files_even_with_cloud_credentials(monkeypatch, tmp_path):
+    """Opening the fictional demo must not upload to the owner's real bucket."""
+    import app.main as entry
+    from app.settings import Settings
+    configured = Settings(data_dir=tmp_path, owner_password='test-owner',
+        supabase_database_url='postgresql://owner:password@db.example.com:5432/postgres',
+        supabase_url='https://example.supabase.co', supabase_secret_key='sb_secret_example',
+        document_storage='supabase', semantic_search_enabled=True)
+    captured = []
+    monkeypatch.setattr('sys.argv', ['outreach', '--demo'])
+    monkeypatch.setattr('dotenv.load_dotenv', lambda *args, **kwargs: None)
+    monkeypatch.setattr(Settings, 'from_env', classmethod(lambda cls: configured))
+    monkeypatch.setattr(entry, 'create_app', lambda *, settings: captured.append(settings))
+    monkeypatch.setattr('uvicorn.run', lambda *args, **kwargs: None)
+    entry.main()
+    demo = captured[0]
+    assert demo.demo and demo.data_dir == tmp_path / 'demo'
+    assert demo.database_url is None and demo.supabase_database_url is None
+    assert demo.checkpoint_backend == 'sqlite' and demo.checkpoint_postgres_url is None
+    assert demo.document_storage == 'local' and not demo.semantic_search_enabled
+    assert demo.supabase_secret_key == demo.supabase_url == demo.telegram_token == ''
+
+
 def test_restart_after_claim_before_execution_allows_explicit_retry(make_run_manager, workflow_data):
     setup = make_run_manager(); service = AgentService(setup.manager)
     job = service.start(workflow_data.request, 'start')

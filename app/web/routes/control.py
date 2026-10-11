@@ -57,11 +57,13 @@ def connections(request):
 
 
 @router.get('/overview')
-async def overview(request: Request): return {**service(request).overview(), 'connections': connections(request)}
+# Regular def handlers run in FastAPI's thread pool. Slow cloud database reads
+# must not hold up the worker's asynchronous file requests or health checks.
+def overview(request: Request): return {**service(request).overview(), 'connections': connections(request)}
 
 
 @router.get('/runs')
-async def list_runs(request: Request, page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100)):
+def list_runs(request: Request, page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100)):
     return service(request).list_runs(page=page, limit=limit)
 
 
@@ -71,7 +73,7 @@ async def start_run(request: Request, body: WorkflowRequest, idempotency_key: An
 
 
 @router.get('/runs/{run_id}')
-async def run_details(request: Request, run_id: str, event_page: int = Query(1, ge=1)):
+def run_details(request: Request, run_id: str, event_page: int = Query(1, ge=1)):
     return service(request).details(run_id, event_page=event_page)
 
 
@@ -129,7 +131,7 @@ async def check_replies(request: Request, idempotency_key: Annotated[str | None,
 
 
 @router.get('/connectors')
-async def connectors(request: Request): return connections(request)
+def connectors(request: Request): return connections(request)
 
 
 def gmail_account(request):
@@ -190,7 +192,7 @@ async def upload_document(request: Request, filename: str = Query(min_length=1, 
 
 
 @router.get('/documents')
-async def documents(request: Request, page: int = Query(1, ge=1), ids: str = Query('', max_length=164)):
+def documents(request: Request, page: int = Query(1, ge=1), ids: str = Query('', max_length=164)):
     if ids:
         values = ids.split(',')
         if len(values) > 5: raise ValueError('At most five document IDs.')
@@ -199,7 +201,7 @@ async def documents(request: Request, page: int = Query(1, ge=1), ids: str = Que
 
 
 @router.get('/documents/{document_id}')
-async def document_details(request: Request, document_id: str):
+def document_details(request: Request, document_id: str):
     return service(request).documents.get(document_id)
 
 
@@ -224,7 +226,7 @@ class KnowledgeQuery(BaseModel):
 
 
 @router.get('/knowledge/sources')
-async def knowledge_sources(request: Request, page: int = Query(1, ge=1)):
+def knowledge_sources(request: Request, page: int = Query(1, ge=1)):
     return service(request).knowledge.sources(page)
 
 

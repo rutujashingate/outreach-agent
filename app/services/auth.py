@@ -6,6 +6,7 @@ import time
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, InvalidHashError
 from fastapi import HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 
 class OwnerAuth:
@@ -45,7 +46,9 @@ async def require_owner(request: Request):
     settings, auth = request.app.state.settings, request.app.state.auth
     supplied = request.headers.get('X-API-Key', '')
     if settings.api_key and secrets.compare_digest(supplied, settings.api_key): return 'api-owner'
-    session_id, saved = auth.session(request)
+    # Hosted database reads can take time. Keep the event loop free for the
+    # worker's HTTP requests while checking this browser session.
+    session_id, saved = await run_in_threadpool(auth.session, request)
     if request.method not in {'GET', 'HEAD', 'OPTIONS'}:
         origin = request.headers.get('origin')
         if origin and origin.rstrip('/') != settings.app_url: raise HTTPException(403, 'Invalid request origin.')

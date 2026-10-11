@@ -14,6 +14,36 @@ def client_for(setup):
 def execute(client): client.portal.call(client.app.state.service.execute_one)
 
 
+@pytest.mark.parametrize('slow_area', ['overview', 'session_lookup'])
+def test_slow_database_read_leaves_health_requests_responsive(make_run_manager, monkeypatch, slow_area):
+    """A waiting dashboard read must let another request finish in the meantime."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    setup = make_run_manager()
+    entered, release = Event(), Event()
+    with client_for(setup) as client:
+        if slow_area == 'overview':
+            target, name, path = client.app.state.service, 'overview', '/api/overview'
+            original = target.overview
+        else:
+            client.headers.pop('X-API-Key')
+            target, name, path = client.app.state.auth, 'session', '/api/connectors'
+            original = lambda *args: ('test-session', {'csrf': 'test-csrf'})
+        def waiting_read(*args):
+            entered.set()
+            assert release.wait(timeout=5)
+            return original(*args)
+        monkeypatch.setattr(target, name, waiting_read)
+        with ThreadPoolExecutor(max_workers=2) as threads:
+            pending = threads.submit(client.get, path)
+            try:
+                assert entered.wait(timeout=2)
+                assert threads.submit(client.get, '/health').result(timeout=2).status_code == 200
+            finally:
+                release.set()
+            assert pending.result(timeout=5).status_code == 200
+
+
 def test_api_queues_runs_and_resumes_same_run(make_run_manager, workflow_data):
     setup=make_run_manager()
     with client_for(setup) as client:
