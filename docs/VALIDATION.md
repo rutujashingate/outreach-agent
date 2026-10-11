@@ -1,5 +1,14 @@
 # Local validation
 
+## Password rotation recheck — October 10, 2026
+
+- After the owner rotated the database password, a new direct PostgreSQL connection succeeded. Corrected URL encoding in the ignored local `.env`, then gracefully restarted the service so it used the new value. Existing cloud records and queued-work settings were preserved.
+- Owner login and `/health` succeeded. A fresh dashboard-backend validation passed all six real checks: database, checkpoint, files, private access, semantic search, and cleanup. The queue was restored to its previous unpaused setting.
+- Telegram reported connected. The restricted Chromium browser read a public page and extracted its title and text. OCR was available. Brave search remained unconfigured, so independent website discovery still needs its key.
+- Read-only xAI checks returned HTTP 200, reported no blocked/disabled key or blocked team, and listed all three configured model IDs. No paid generation was requested; these checks do not establish live response quality or successful generation.
+- Gmail remained disconnected in the new cloud store. Reconnecting it and creating an explicitly requested test draft remain owner checks. No Telegram message, Gmail draft, or email was sent by these diagnostics.
+- Added a practical [connected-application checklist](SETUP.md#check-your-connected-application). This follow-up changed documentation and local ignored configuration only. Git whitespace and documentation-link checks passed; the earlier 497-test code result below was not rerun for prose changes.
+
 ## Hosted Supabase connection and dashboard responsiveness — October 10, 2026
 
 - The owner supplied credentials privately. Corrected the password's URL encoding without changing the database password, stopped the idle local service, backed up its SQLite files under `.data/backups`, and enabled Supabase originals and semantic search. The three failed local test jobs remain in the archive; old runs and Google tokens were not imported.

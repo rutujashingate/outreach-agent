@@ -255,6 +255,20 @@ The second command needs Chromium and Tesseract; it includes real local browser,
 
 Use `/health` for basic service health and Connections for connector status. The current service intentionally has no public `/docs` or legacy `/outreach` route; the [API guide](API_GUIDE.md) documents its authenticated interface.
 
+### Check your connected application
+
+Keep the normal service running with `python -m app.main`. If it is already running, use that instance rather than starting another. After changing `.env`, stop the old process and restart it so it reads the saved values.
+
+1. **Open the dashboard:** visit **http://127.0.0.1:8000** and sign in with your owner password. Open **Connections**. Confirm Telegram is connected, the browser is available, and the storage backend is the one you chose.
+2. **Check storage:** press **Validate storage**. With Supabase and semantic search enabled, all six checks should pass: database records, saved task progress, original files, private access, saved-knowledge search, and removal of temporary test data. These checks use real storage and local embeddings; they do not call the language model or Gmail.
+3. **Check a real model answer:** tell your Telegram bot, “Hi, what can you help me with?” A useful reply confirms an actual model request succeeded. The dashboard's configured-model status only means a key is present; it does not prove that credits, model permissions, or generation work. Real replies use provider credits.
+4. **Check file reading and recall:** upload a small PDF or text document with “Summarize this and cite the source.” Use `/files` to check extraction progress. In **Saved knowledge**, wait for indexing to finish, then search for a fact from that document and inspect the matching passage. Start a fresh conversation with `/new` and ask the bot to find that fact in your saved documents. This last step tests recall beyond the current chat's attachments. Try an image separately to check OCR.
+5. **Check website reading and discovery separately:** ask the bot to read a supplied public website and explain its contents. Confirm its answer cites that website. Finding new websites from a request such as “Find Python jobs” also needs a Brave key; a working browser alone does not provide search discovery.
+6. **Check stopping and continuing:** during a task that reads several pages, say **stop**. Wait for the stop confirmation, then say **continue**. It should keep the same task ID, goal, saved evidence, and usage counters. To check restart recovery, stop the task, restart the service, and use `/continue RUN_ID`. A call already underway may finish before the stop takes effect. See [model and tool behavior](MODELS_AND_TOOLS.md) for the boundaries.
+7. **Check a requested Gmail draft:** if Connections says Gmail is disconnected, select **Connect Google** first. Explicitly request one test outreach draft addressed to your own email, supply the necessary context, and start the proposal. Inspect the resulting draft in Gmail. Confirm that no message was sent. Review, edit, and send manually in Gmail only if you choose. A summary or research request alone should create no draft.
+
+Inspect the dashboard's job results and a run's activity alongside the answer. Model/tool events show which step ran and whether it succeeded; source passages show what evidence supported it. An unavailable model, failed extraction, missing recipient, or exhausted budget should be resolved before continuing that task. [Validation history](VALIDATION.md) records completed checks separately from account-dependent tests.
+
 ## 7. Docker packaging
 
 After local checks, Docker Compose can package the same service:
