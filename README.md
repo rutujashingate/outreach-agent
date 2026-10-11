@@ -24,7 +24,7 @@ A conversational Telegram assistant for questions, file reading, public-web rese
 
 ![Telegram questions use reading tools; explicit email requests produce Gmail drafts for the owner to review and send, with persistent state](docs/assets/workflow.svg)
 
-One saved queue serves conversation and outreach. A draft request becomes a concrete proposal with a **Start outreach** button. Ordinary searches and file questions do not create emails. Uncertain Gmail writes remain blocked for inspection.
+One saved queue serves conversation and outreach. Clear requests to research, read files, or create drafts start directly. The bot asks for confirmation before starting only when you request it. Ordinary searches and file questions do not create emails. Sending stays manual in Gmail; uncertain Gmail writes remain blocked for inspection.
 
 ## Try it locally
 

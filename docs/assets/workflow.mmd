@@ -20,15 +20,17 @@ config:
 ---
 flowchart TD
     accTitle: Requested outreach drafts with manual Gmail sending
-    accDescr: Telegram messages enter a saved queue. LangGraph answers questions and uses reading tools. An explicit email request and the owner's Create draft action enter drafting. Known recipients go directly to writing preparation without prospect discovery or fit scoring. Finding new contacts follows research, qualification and address selection. Both paths retain relationship checks, writing, review and duplicate protection. The owner reviews, edits and sends in Gmail. SQLite or one Supabase PostgreSQL database holds saved state.
+    accDescr: Telegram messages enter a saved queue. LangGraph answers questions and uses reading tools. Explicit email requests start drafting directly; a confirmation button is used only when the owner asks to wait. Known recipients go directly to writing preparation without prospect discovery or fit scoring. Finding new contacts follows research, qualification and address selection. Both paths retain relationship checks, writing, review and duplicate protection. The owner reviews, edits and sends in Gmail. SQLite or one Supabase PostgreSQL database holds saved state.
     telegram["Private Telegram<br/>Normal messages, files and decisions"] --> service["Shared service<br/>Saved queue and one worker"]
     dashboard["Owner dashboard<br/>Connections and controls"] --> service
     service --> chat["LANGGRAPH CONVERSATION<br/>4.3 instructions · 4.20 reasoning/tools<br/>Saved request + step + collected evidence"]
     chat -->|Read evidence| tools["Bounded read-only tools<br/>Files · browser · web / saved search · run status<br/>Multi-Agent evidence analysis when needed"]
     tools --> chat
     chat -->|Answer or clarify| answer["Reply in Telegram<br/>Continue the conversation"]
-    chat -->|Email drafts requested| proposal["Short confirmation + Create draft(s) button"]
-    proposal -->|Owner confirms| kind{"Known recipient<br/>or find new contacts?"}
+    chat -->|Email drafts requested| requested["Validate the owner's writing request"]
+    requested -->|Start directly| kind{"Known recipient<br/>or find new contacts?"}
+    requested -->|Only if owner asks to wait| proposal["Show proposal + wait for confirmation"]
+    proposal -->|Owner confirms| kind
     kind -->|Known recipient| direct["Use the owner's writing request<br/>Read supplied files when needed"]
     kind -->|Find contacts| files["Optional uploaded files<br/>Read text / local OCR · save cited evidence"]
     service -->|Dashboard or guided outreach| files

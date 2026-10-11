@@ -422,7 +422,7 @@ def test_cancellation_stops_chat_at_next_boundary(make_run_manager):
     asyncio.run(check())
 
 
-def test_explicit_draft_request_saves_only_after_owner_starts_proposal(tmp_path):
+def test_owner_request_to_wait_keeps_confirmation_and_starts_once(tmp_path):
     from app.demo import build_demo_manager, DemoModelClient, demo_request
     model = DemoModelClient()
     manager = build_demo_manager(settings=Settings(data_dir=tmp_path, telegram_owner_id=123))
@@ -433,7 +433,7 @@ def test_explicit_draft_request_saves_only_after_owner_starts_proposal(tmp_path)
     class ProposalWithBrowser:
         async def generate_structured(self, **kwargs):
             if kwargs['response_model'].__name__ == 'ConversationAction':
-                return {'action': 'outreach', 'request': request.model_dump(mode='json')}
+                return {'action': 'outreach', 'require_confirmation': True, 'request': request.model_dump(mode='json')}
             return await model.generate_structured(**kwargs)
     @asynccontextmanager
     async def with_browser():
@@ -442,7 +442,7 @@ def test_explicit_draft_request_saves_only_after_owner_starts_proposal(tmp_path)
     service = AgentService(manager)
     async def check():
         bot = TelegramBot(service, FakeTelegram())
-        await dispatch(bot, 1, 'Prepare a Gmail draft for PhD outreach')
+        await dispatch(bot, 1, 'Show me your plan for PhD outreach and wait for my approval before drafting.')
         turn = service.store.jobs()[0]
         await service.execute_one()
         assert 'Create drafts' in result(service, turn)['text']
@@ -472,7 +472,8 @@ def test_explicit_draft_request_saves_only_after_owner_starts_proposal(tmp_path)
 
 
 def test_followup_invalidates_proposal_before_it_finishes(make_run_manager):
-    setup = make_run_manager(responses=[{'action': 'outreach', 'request': {'goal': 'Find AI researchers'}}])
+    setup = make_run_manager(responses=[{'action': 'outreach', 'require_confirmation': True,
+                                      'request': {'goal': 'Find AI researchers'}}])
     service = AgentService(setup.manager)
     async def check():
         job = service.conversations.queue('Find AI researchers', 'session', [], 'one')

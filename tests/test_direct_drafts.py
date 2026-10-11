@@ -133,7 +133,7 @@ def test_direct_draft_continues_after_stop_without_rewriting(make_run_manager):
     asyncio.run(exercise())
 
 
-def test_telegram_direct_draft_has_friendly_confirmation_and_one_gmail_write(make_run_manager):
+def test_telegram_direct_draft_starts_without_button_and_saves_once(make_run_manager):
     proposal = {'action': 'outreach', 'request': request().model_dump(mode='json')}
     setup = make_run_manager(responses=[proposal, *model_results()], gmail=ConnectedGmail(),
                              settings=Settings(telegram_owner_id=123))
@@ -141,22 +141,19 @@ def test_telegram_direct_draft_has_friendly_confirmation_and_one_gmail_write(mak
     bot = TelegramBot(service, client)
 
     async def exercise():
-        service.store.accept_updates([{'update_id': 1, 'message': {'from': {'id': 123},
-            'chat': {'id': 123, 'type': 'private'}, 'text': 'Write a short test email to friend@example.com with subject Hello.'}}], 123)
+        update = {'update_id': 1, 'message': {'from': {'id': 123},
+            'chat': {'id': 123, 'type': 'private'}, 'text': 'Write a short test email to friend@example.com with subject Hello.'}}
+        service.store.accept_updates([update, update], 123)
         await bot.process_one()
+        assert not await bot.process_one()
         await service.execute_one()
         assert not any(kind == 'draft' for kind, _ in setup.gmail.calls)
         while await bot.deliver_one(): pass
         texts = [payload['text'] for method, payload in client.calls if method == 'sendMessage']
-        assert 'friend@example.com' in texts[0] and 'Create draft' in texts[0]
+        assert 'friend@example.com' in texts[0] and 'Create draft' not in texts[0]
         assert not any(term in texts[0] for term in ('Web search:', 'Batch limit:', 'qualification', 'Run:', 'not supplied'))
-        button = next(button for _, payload in client.calls for row in payload.get('reply_markup', {}).get('inline_keyboard', [])
-                      for button in row if button['text'] == 'Create draft')
-        for number in (2, 3):
-            service.store.accept_updates([{'update_id': number, 'callback_query': {'id': str(number),
-                'from': {'id': 123}, 'data': button['callback_data'],
-                'message': {'chat': {'id': 123, 'type': 'private'}}}}], 123)
-            await bot.process_one()
+        assert not any(payload.get('reply_markup') for method, payload in client.calls if method == 'sendMessage')
+        assert len([job for job in service.store.jobs() if job['kind'] == 'start']) == 1
         await service.execute_one()
         while await bot.deliver_one(): pass
         assert len([kind for kind, _ in setup.gmail.calls if kind == 'draft']) == 1
@@ -166,6 +163,41 @@ def test_telegram_direct_draft_has_friendly_confirmation_and_one_gmail_write(mak
         assert json.loads(setup.client.calls[0].input_text)['connected_email'] == 'owner@example.com'
         stats = service.overview()['stats']
         assert stats['drafts'] == 1 and stats['qualified'] == 0
+
+    asyncio.run(exercise())
+
+
+def test_restart_after_queue_confirmation_loss_does_not_duplicate_requested_draft(make_run_manager, monkeypatch):
+    proposal = {'action': 'outreach', 'request': request().model_dump(mode='json')}
+    setup = make_run_manager(responses=[proposal, *model_results(), {'action': 'reply', 'text': 'Hello!'}],
+                             gmail=ConnectedGmail(), settings=Settings(telegram_owner_id=123))
+    service = AgentService(setup.manager)
+    start = service.start
+
+    def lose_confirmation(*args, **kwargs):
+        start(*args, **kwargs)
+        raise RuntimeError('Simulated interruption after durable enqueue.')
+
+    monkeypatch.setattr(service, 'start', lose_confirmation)
+
+    async def exercise():
+        turn = service.conversations.queue('Draft a test email to friend@example.com', 'session', [], 'first')
+        await service.execute_one()
+        assert service.store.jobs()[0]['status'] in {'queued', 'failed'}
+        assert len([job for job in service.store.jobs() if job['kind'] == 'start']) == 1
+        cached = service.store.get('chat:result:' + turn['run_id'])
+        assert cached['start_requested'] and 'started_run_id' not in cached
+        fresh = AgentService(setup.manager)
+        fresh.conversations.queue('Hi', 'session', [], 'newer-message')
+        fresh.retry(turn['run_id'], 'recover')
+        while await fresh.execute_one(): pass
+        starts = [job for job in fresh.store.jobs() if job['kind'] == 'start']
+        assert len(starts) == 1
+        recovered = fresh.store.get('chat:result:' + turn['run_id'])
+        assert recovered['started_run_id'] == starts[0]['run_id']
+        assert [kind for kind, _ in setup.gmail.calls if kind == 'draft'] == ['draft']
+        assert not any(kind == 'send' for kind, _ in setup.gmail.calls)
+        assert len(setup.client.calls) == 4
 
     asyncio.run(exercise())
 

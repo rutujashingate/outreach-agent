@@ -1,5 +1,16 @@
 # Local validation
 
+## Immediate starts for clear Telegram requests — October 11, 2026
+
+- Clear instructions to draft now queue the existing workflow directly. The optional confirmation remains when the owner explicitly asks to wait. Research and file-reading requests retain their immediate read-only execution and do not create emails.
+- **527 tests passed** with `RUN_POSTGRES_TESTS=1 RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/pytest -o addopts='' -o faulthandler_timeout=30 -q --tb=short`, including real local PostgreSQL/pgvector, Chromium, and OCR checks. The targeted conversation, direct-drafting, continuation, and background-recovery checks passed too.
+- Fake Telegram-to-Gmail execution creates one draft from a repeated owner update with no confirmation button and no send call. A new interruption check loses confirmation just after queuing the child run, rebuilds the service, and retries after another chat message; it reuses that run and creates one draft. Explicit wait requests still create no Gmail action before confirmation, repeated clicks start once, and changed requests invalidate stale proposals.
+- Existing edit/version checks, contact checks, budgets, uncertain-write handling, and the prohibition on agent sending remain covered by the suite. Older saved proposals keep waiting rather than being silently started during the upgrade.
+- Updated setup instructions, the README, and the phase-by-phase file guide. Rendered and visually inspected the revised workflow image.
+- Paused the idle queue, gracefully restarted the local service, and restored its earlier unpaused setting. Owner login and health succeeded; the worker, Telegram poller, message handler, and progress display all reported running. Telegram and Gmail stayed connected, with the existing Supabase database retained.
+
+The workflow checks use fake Telegram, models, and Gmail. Actual provider interpretation and a requested draft appearing in the owner's Gmail remain live acceptance checks; diagnostics do not start an extra conversation, paid model call, or email action.
+
 ## Friendly Telegram conversation and direct email drafting — October 11, 2026
 
 - The reported test-email request was following company discovery and qualification, so an empty prospect list prevented drafting. Added a direct path for explicitly supplied recipients, joining the existing memory, contact, writing, review, and draft-saving steps. Requests to find new prospects still use research and qualification.

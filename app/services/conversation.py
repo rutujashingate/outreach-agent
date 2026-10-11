@@ -1,7 +1,8 @@
 """Queue normal messages, remember recent turns, and run read-only chat tools.
 
-The conversational model can propose outreach, but only the shared outreach
-service can start it. A proposal button never approves an email.
+The shared service starts explicitly requested drafting after validation.
+Only requests to wait for approval keep the optional proposal button. Starting
+draft preparation never authorizes sending or changing an existing email.
 """
 import json
 import asyncio
@@ -129,9 +130,15 @@ class ConversationService:
                     'chat:result:' + run_id: cached,
                     'resume:' + run_id: {'next_steps': [], 'completed_tools': len(output.get('observations', []))}})
             await check_cancelled(self.manager.repository, run_id)
+            if cached.get('start_requested'):
+                # Save the model's request before this step. A restart or a
+                # lost database confirmation reuses the same child job key.
+                started = await asyncio.to_thread(self._start_requested, run_id, payload['session_id'])
+                cached = {**cached, 'started_run_id': started['run_id']}
+                await asyncio.to_thread(self.store.put, 'chat:result:' + run_id, cached)
             await asyncio.to_thread(self._remember, run_id, payload, cached)
             entries = []
-            if cached.get('proposal'):
+            if cached.get('proposal') and not cached.get('start_requested'):
                 from app.services.presentation import draft_button
                 entries.append((draft_button(WorkflowRequest.model_validate(cached['proposal'])), {'chat_proposal': run_id, 'conversation': payload['session_id']}))
             if cached.get('review_run_id'):
@@ -330,7 +337,7 @@ class ConversationService:
         return observation
 
     def response(self, action, observations, context):
-        """Build an answer and, when requested, a concrete outreach proposal."""
+        """Build an answer and validate any explicitly requested drafting work."""
         evidence = [*context.inputs['previous_evidence'], *observations]
         known_sources = {source['ref']: source['label'] for item in evidence for source in item.get('sources', [])}
         sources = [ref for ref in action.sources if ref in known_sources]
@@ -375,8 +382,10 @@ class ConversationService:
                 material = '\n\n'.join(json.dumps(item, ensure_ascii=False) for item in research_evidence)
                 request = request.model_copy(update={'research_material': material[:100000]})
                 result['proposal'] = request.model_dump(mode='json')
-                from app.services.presentation import proposal_summary
-                result['text'] = proposal_summary(request, self.manager.settings.limits.max_qualified)
+                result['start_requested'] = not action.require_confirmation
+                from app.services.presentation import proposal_summary, start_summary
+                summary = proposal_summary if action.require_confirmation else start_summary
+                result['text'] = summary(request, self.manager.settings.limits.max_qualified)
             except (ValueError, RunConflict, ConfigurationError) as error:
                 result['text'] = str(error) if isinstance(error, (RunConflict, ConfigurationError)) else 'Please clarify the outreach goal and which sources I should use.'
         else:
@@ -394,6 +403,14 @@ class ConversationService:
             if warnings:
                 result['text'] += '\n\nReading limits: ' + ' '.join(warnings)
         return result
+
+    def _start_requested(self, turn_id, session_id):
+        """Recover an already queued request without creating another run."""
+        existing = self.store.find_job('chat:proposal:' + turn_id)
+        if existing:
+            self.service.tasks.remember(session_id, existing['run_id'])
+            return existing
+        return self.start_proposal(turn_id, session_id)
 
     def start_proposal(self, turn_id, session_id):
         result = self.store.get('chat:result:' + turn_id, {})

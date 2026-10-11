@@ -15,6 +15,18 @@ def draft_button(request):
     return 'Create draft' if request.draft_mode == 'direct' and len(request.recipients) == 1 else 'Create drafts'
 
 
+def start_summary(request, limit):
+    """Acknowledge authorized work without asking the owner to confirm again."""
+    if request.draft_mode == 'direct':
+        addresses = ', '.join(recipient.email for recipient in request.recipients.values())
+        text = f"Sure — I'll prepare {'a draft' if len(request.recipients) == 1 else 'drafts'} to {addresses}."
+    else:
+        text = f"Sure — I'll research suitable contacts and prepare up to {limit} drafts."
+    if request.gmail_action == 'draft':
+        return text + " I'll save them in Gmail and let you know when they're ready to review."
+    return text + " I'll keep them here and let you know when they're ready."
+
+
 def proposal_summary(request, limit):
     """Explain what the owner is confirming, without exposing configuration."""
     if request.draft_mode == 'direct':

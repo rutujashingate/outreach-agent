@@ -19,6 +19,9 @@ class ConversationAction(Record):
     run_id: str = Field(default='', max_length=64)
     sources: list[str] = Field(default_factory=list, max_length=20)
     request: WorkflowRequest | None = None
+    # Clear owner instructions start work directly. Only an explicit request
+    # to wait/show a plan first requires the optional start button.
+    require_confirmation: bool = Field(default=False, strict=True)
     # Set by the provider adapter, then saved with the tool result for replay.
     call_id: str = Field(default='', max_length=200)
 
