@@ -12,6 +12,7 @@ from app.storage.repository import Repository
 from app.llm.client import OpenAIModelClient
 from app.llm.groq_client import GroqModelClient
 from app.llm.xai_client import XAIModelClient
+from app.llm.xai_routing import XAITaskRouter, configured_models, role_for
 from app.domain.workflow import ApprovalSubmission, RunResponse, WorkflowRequest, WorkflowState
 from app.storage.events import events, trace
 from app.agent.context import ManagedModelClient, ManagedSearchTool, WorkflowContext
@@ -45,24 +46,39 @@ async def real_model_client(settings: Settings):
     class LazyClient:
         last_usage = {}
         model_name = None
+        supports_task_routing = settings.model_provider == 'xai' and settings.xai_task_routing
+
+        def route_info(self, response_model):
+            if self.supports_task_routing:
+                role = role_for(response_model)
+                return {'role': role, 'model': configured_models()[role]}
+            return {}
 
         async def generate_structured(self, **kwargs):
             nonlocal sdk, http_model
             if settings.model_provider in {"groq", "xai"}:
                 if http_model is None:
-                    adapter = XAIModelClient if settings.model_provider == "xai" else GroqModelClient
                     try:
-                        http_model = adapter.from_env(
+                        options = dict(
                             max_output_tokens=settings.limits.max_output_tokens,
                             timeout=settings.limits.model_timeout,
                         )
+                        if self.supports_task_routing:
+                            if not os.getenv('XAI_API_KEY', '').strip():
+                                raise ValueError('Missing xAI key.')
+                            http_model = XAITaskRouter(**options)
+                        else:
+                            adapter = XAIModelClient if settings.model_provider == 'xai' else GroqModelClient
+                            http_model = adapter.from_env(**options)
                     except ValueError as error:
                         if settings.model_provider == "xai":
                             raise ConfigurationError("Configure XAI_API_KEY, a supported XAI_MODEL, and XAI_REASONING_EFFORT in .env, then restart.") from error
                         raise ConfigurationError("Configure GROQ_API_KEY and a supported GROQ_MODEL for complete runs.") from error
-                result = await http_model.generate_structured(**kwargs)
-                self.last_usage = http_model.last_usage
-                self.model_name = http_model.model_name
+                try:
+                    result = await http_model.generate_structured(**kwargs)
+                finally:
+                    self.last_usage = http_model.last_usage
+                    self.model_name = http_model.model_name
                 return result
             api_key, model = os.getenv("OPENAI_API_KEY", ""), os.getenv("OPENAI_MODEL", "")
             if not api_key.strip() or not model.strip():
@@ -96,6 +112,7 @@ class RunManager:
         if isinstance(checkpointer.serde, JsonPlusSerializer):
             checkpointer.serde = checkpoint_serializer()
         self.graph = build_full_graph(checkpointer)
+        self.checkpointer = checkpointer
         self.client_factory = client_factory or (lambda: real_model_client(self.settings))
         self.search, self.gmail = search, gmail
         self.memory_retriever = memory_retriever

@@ -38,6 +38,7 @@ class DemoMessage(BaseModel):
 
 
 def connections(request):
+    from app.llm.xai_routing import configured_models
     manager = service(request).manager
     settings = manager.settings
     model_key = {'groq': 'GROQ_API_KEY', 'openai': 'OPENAI_API_KEY', 'xai': 'XAI_API_KEY'}[settings.model_provider]
@@ -48,6 +49,7 @@ def connections(request):
             'browser': {'available': manager.browser is not None}, 'search': {'configured': manager.search is not None},
             'documents': service(request).documents.status(),
             'model': {'provider': settings.model_provider, 'configured': settings.demo or bool(os.getenv(model_key, '').strip())}, 'demo': settings.demo,
+            'model_routes': configured_models() if settings.model_provider == 'xai' and settings.xai_task_routing and not settings.demo else {},
             'sender_profile': service(request).store.get('sender_profile', {'name': 'User', 'context': ''})}
 
 

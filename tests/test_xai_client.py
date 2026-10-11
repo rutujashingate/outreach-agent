@@ -134,7 +134,7 @@ def test_invalid_configuration_is_rejected_before_creating_connection(changes):
 
 
 def test_saved_outreach_uses_xai_and_approval_needs_no_more_model_calls(make_run_manager, workflow_data, monkeypatch):
-    settings = Settings(model_provider='xai', checkpoint_backend='memory')
+    settings = Settings(model_provider='xai', xai_task_routing=False, checkpoint_backend='memory')
     setup = make_run_manager(settings=settings)
     replies, requests, factories = iter(workflow_data.responses), [], []
     def handle(request):
@@ -166,7 +166,7 @@ def test_saved_outreach_uses_xai_and_approval_needs_no_more_model_calls(make_run
 def test_missing_xai_key_does_not_fall_back_to_another_provider(make_run_manager, monkeypatch):
     monkeypatch.setenv('GROQ_API_KEY', 'unused-other-provider')
     monkeypatch.setenv('OPENAI_API_KEY', 'unused-other-provider')
-    settings = Settings(model_provider='xai', checkpoint_backend='memory')
+    settings = Settings(model_provider='xai', xai_task_routing=False, checkpoint_backend='memory')
     setup = make_run_manager(settings=settings)
     setup.manager.client_factory = lambda: real_model_client(settings)
     with pytest.raises(ConfigurationError, match='XAI_API_KEY') as error:
@@ -175,7 +175,7 @@ def test_missing_xai_key_does_not_fall_back_to_another_provider(make_run_manager
 
 
 def test_dashboard_checks_selected_key_without_exposing_it(make_run_manager, monkeypatch):
-    setup = make_run_manager(settings=Settings(model_provider='xai', api_key='test-dashboard'))
+    setup = make_run_manager(settings=Settings(model_provider='xai', xai_task_routing=False, api_key='test-dashboard'))
     monkeypatch.setenv('OPENAI_API_KEY', 'unused-other-provider')
     monkeypatch.setenv('GROQ_API_KEY', 'unused-other-provider')
     with TestClient(create_app(manager=setup.manager, background=False), headers={'X-API-Key': 'test-dashboard'}) as browser:
@@ -201,7 +201,7 @@ def test_chat_worker_saves_safe_xai_failures_with_bounded_attempts(make_run_mana
         async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
             adapter = XAIModelClient(model=DEFAULT_XAI_MODEL, api_key='private-secret', http_client=http)
             monkeypatch.setattr('app.services.runs.XAIModelClient.from_env', lambda **kwargs: adapter)
-            settings = Settings(model_provider='xai', telegram_owner_id=123)
+            settings = Settings(model_provider='xai', xai_task_routing=False, telegram_owner_id=123)
             setup = make_run_manager(settings=settings)
             setup.manager.client_factory = lambda: real_model_client(settings)
             service = AgentService(setup.manager)
@@ -232,7 +232,7 @@ def test_telegram_greeting_reaches_xai_and_returns_one_answer_without_outreach(m
         async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
             adapter = XAIModelClient(model=DEFAULT_XAI_MODEL, api_key='test-only', http_client=http)
             monkeypatch.setattr('app.services.runs.XAIModelClient.from_env', lambda **kwargs: adapter)
-            settings = Settings(model_provider='xai', telegram_owner_id=123)
+            settings = Settings(model_provider='xai', xai_task_routing=False, telegram_owner_id=123)
             setup = make_run_manager(settings=settings)
             setup.manager.client_factory = lambda: real_model_client(settings)
             service = AgentService(setup.manager)

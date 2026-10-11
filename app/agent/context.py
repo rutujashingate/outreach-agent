@@ -23,6 +23,10 @@ class ManagedModelClient:
         self.semaphore = asyncio.Semaphore(limits.concurrency)
         self.consecutive_failures = 0
 
+    @property
+    def supports_task_routing(self):
+        return getattr(self.client, 'supports_task_routing', False)
+
     async def generate_structured(self, *, instructions, input_text, response_model):
         async with self.semaphore:
             if self.consecutive_failures >= 3:
@@ -33,7 +37,8 @@ class ManagedModelClient:
                 check_cancelled(self.repository, self.run_id)
                 self.repository.reserve_call(self.run_id, "model", self.limits)
                 started = time.monotonic()
-                trace(self.repository, self.run_id, "model_start", task=response_model.__name__, attempt=attempt)
+                route = self.client.route_info(response_model) if hasattr(self.client, 'route_info') else {}
+                trace(self.repository, self.run_id, "model_start", task=response_model.__name__, attempt=attempt, **route)
                 try:
                     async with asyncio.timeout(self.limits.model_timeout):
                         result = await self.client.generate_structured(
@@ -42,7 +47,7 @@ class ManagedModelClient:
                     self.consecutive_failures = 0
                     trace(self.repository, self.run_id, "model_end", task=response_model.__name__,
                           seconds=time.monotonic() - started, usage=getattr(self.client, "last_usage", {}),
-                          model=getattr(self.client, "model_name", None))
+                          model=getattr(self.client, "model_name", None), role=route.get('role'))
                     return result
                 except (ModelClientError, TimeoutError) as error:
                     self.consecutive_failures += 1
@@ -50,7 +55,8 @@ class ManagedModelClient:
                                 "http_status": error.status_code, "message": error.public_message}
                                if isinstance(error, ModelProviderError) else {})
                     trace(self.repository, self.run_id, "model_failure", task=response_model.__name__,
-                          error_type=type(error).__name__, seconds=time.monotonic() - started, **details)
+                          error_type=type(error).__name__, seconds=time.monotonic() - started,
+                          usage=getattr(self.client, 'last_usage', {}), **route, **details)
                     if (attempt or isinstance(error, (ModelResponseError, TimeoutError))
                             or isinstance(error, ModelProviderError) and not error.retryable):
                         if isinstance(error, TimeoutError):

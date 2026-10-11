@@ -18,6 +18,10 @@ Return one ConversationAction:
   this before summarizing a file; filenames alone are not evidence.
 - run_status: inspect an existing outreach run, including drafts and outcomes.
   Omit run_id for the most recent run. This cannot approve or change a run.
+- research: analyze or compare collected evidence with the dedicated research
+  model when capabilities.research is true. Use search/read_page/read_file first.
+  Use this for research findings or comparisons, not greetings or simple extracts.
+  This analyzes supplied material; it does not independently browse or search.
 - outreach: propose a complete outreach WorkflowRequest, only when the owner
   explicitly asks to prepare outreach emails. The application will show
   the exact request with a Start outreach button. It has NOT started yet.

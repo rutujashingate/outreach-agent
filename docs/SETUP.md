@@ -26,8 +26,11 @@ If you do not have `.env` yet, copy `.env.example` to `.env`. If you already hav
 | `OUTREACH_OWNER_PASSWORD` | A strong password you choose for the dashboard. Required for normal browser login. |
 | `OUTREACH_MODEL_PROVIDER=xai` | Selects Grok on xAI for conversation and outreach. The template selects this explicitly; the app does not switch providers when a call fails. |
 | `XAI_API_KEY` | Your API key from [xAI Console](https://console.x.ai/). Paste it only into `.env`. An existing key works if its permissions and team's available API credits allow the request. |
-| `XAI_MODEL=grok-4.3` | The Grok model requested by the app. Giving your key access to all models does not make the app use all of them. |
-| `XAI_REASONING_EFFORT=none` | Starts without extra reasoning tokens. Grok 4.3 also supports `low`, `medium`, `high`, and `xhigh`; higher effort can increase usage. |
+| `XAI_TASK_ROUTING=true` | Selects the three model roles below. One xAI key serves all of them. |
+| `XAI_INSTRUCTION_MODEL=grok-4.3` | Understand instructions and write drafts. |
+| `XAI_REASONING_MODEL=grok-4.20-0309-reasoning` | Select tools, reason over results, qualify and review. |
+| `XAI_RESEARCH_MODEL=grok-4.20-multi-agent-0309` | Analyze supplied research evidence with four collaborating agents. |
+| `XAI_REASONING_EFFORT=none` | Applies to the instruction model only. Multi-agent research uses `low`; the reasoning model uses its built-in reasoning behavior. |
 | `OUTREACH_TELEGRAM_BOT_TOKEN` | Token for your bot, issued by Telegram’s BotFather. |
 | `OUTREACH_TELEGRAM_OWNER_ID` | Your numeric Telegram user ID. The bot accepts only this user in their private chat. |
 | `BRAVE_SEARCH_API_KEY` | Optional [Brave Search API](https://brave.com/search/api/) key. Finds relevant pages. Omit it when supplying URLs or notes yourself. |
@@ -40,7 +43,7 @@ If you do not have `.env` yet, copy `.env.example` to `.env`. If you already hav
 
 Do not put secrets in Telegram messages, goals, Git commits, or screenshots. A connection shown as “configured” only means settings are present; the provider verifies them when called.
 
-The xAI adapter uses [Responses](https://docs.x.ai/developers/rest-api-reference/inference/responses) with structured JSON output, `store=false`, and the app's output-token limit (4,000 by default). Website research still uses the local browser and optional Brave connector; xAI-hosted search tools are not enabled. The output limit covers visible output, not extra reasoning, which is why the starting reasoning choice is explicit. See [Grok 4.3 settings](https://docs.x.ai/developers/models/grok-4.3).
+The xAI adapter uses [Responses](https://docs.x.ai/developers/rest-api-reference/inference/responses), native function calls for conversation tools, structured records, `store=false`, and the app's output-token limit (4,000 by default). Website research uses the local browser and optional Brave connector; xAI-hosted search tools are not enabled. Research analyzes the gathered evidence. The output limit covers visible output, not all internal reasoning. See [models and tools](MODELS_AND_TOOLS.md) for the role map, flowchart, limits, and compatibility settings.
 
 Other installed adapters remain optional. To select **Groq**, set `OUTREACH_MODEL_PROVIDER=groq`, `GROQ_API_KEY`, and `GROQ_MODEL` (default `openai/gpt-oss-120b`). This model runs on Groq and does not require an OpenAI account. To select **OpenAI**, set `OUTREACH_MODEL_PROVIDER=openai`, `OPENAI_API_KEY`, and `OPENAI_MODEL`. Only the selected provider's key is used. If `OUTREACH_MODEL_PROVIDER` is absent, the older Groq default remains for existing installations.
 

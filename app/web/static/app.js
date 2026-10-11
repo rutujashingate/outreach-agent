@@ -527,6 +527,7 @@ function renderConnections(c) {
       "Model provider",
       c.model.configured ? "configured" : "not configured",
       c.model.provider +
+        (Object.keys(c.model_routes || {}).length ? " · " + Object.entries(c.model_routes).map(([role, model]) => `${role}: ${model}`).join(" · ") : "") +
         " · configuration presence only; credentials are checked when used",
     ),
     card(

@@ -12,6 +12,7 @@ A conversational Telegram assistant for questions, file reading, public-web rese
 - Answers normal Telegram messages, remembers recent conversation, and chooses read-only tools when needed. `/new` is an optional reset; `/guided` opens step-by-step outreach setup.
 - Reads uploaded PDFs, scanned pages, images, Word/OpenDocument files, and text. Uses relevant content to guide research, with filename/page references.
 - Researches public websites and optional Brave results; retains sources and published email evidence.
+- Routes instruction following to Grok 4.3, reasoning/tool selection to Grok 4.20, and evidence analysis to 4.20 Multi-Agent. [Models and tools](docs/MODELS_AND_TOOLS.md).
 - Qualifies prospects, checks relationship history and contact rules, and writes personalized drafts.
 - Shows drafts, evidence, progress, retries, and cancellation in Telegram and the dashboard. App-only drafts retain review controls.
 - Saves jobs, conversations, approvals, and workflow progress across restarts.

@@ -95,3 +95,6 @@ Existing local `.env` credentials and database files were preserved. Manual serv
 - **Docker build/run and Linux hosting:** Docker is not installed on the development machine. Dockerfile/Compose packaging is provided, but a container build and host-specific Chromium sandbox operation have not been verified. Remote hosting has not been performed.
 
 Follow [setup](SETUP.md) for these checks. Local implementation is complete; live connector acceptance remains separate until the configured accounts and hosting environment are exercised.
+# Model routing and tool calls — 2026-10-10
+
+130 focused tests passed across model routing, xAI compatibility, conversation, full outreach, checkpoints/controls, authenticated API, and the shared service. `node --check app/web/static/app.js` passed. New mocked HTTP checks exercised the requested three-model sequence and native function calls through the actual graph; invalid tool requests were rejected. No live provider generation or real Telegram/Gmail message was sent. All model routes still need live account access and a quality check on real inputs. Local `.env` changes were limited to non-secret role settings and preserved existing credentials.

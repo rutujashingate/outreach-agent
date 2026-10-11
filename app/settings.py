@@ -14,6 +14,7 @@ class Settings(BaseModel):
     model_config = ConfigDict(hide_input_in_errors=True)
     # Existing installs keep the Groq fallback; .env.example explicitly selects xAI.
     model_provider: Literal["openai", "groq", "xai"] = "groq"
+    xai_task_routing: bool = True
     data_dir: Path = Path(".data")
     supabase_database_url: str | None = Field(default=None, repr=False, exclude=True)
     database_url: str | None = Field(default=None, repr=False, exclude=True)
@@ -50,6 +51,7 @@ class Settings(BaseModel):
     def from_env(cls):
         return cls(
             model_provider=os.getenv("OUTREACH_MODEL_PROVIDER", "groq"),
+            xai_task_routing=os.getenv('XAI_TASK_ROUTING', 'true').lower() == 'true',
             data_dir=Path(os.getenv("OUTREACH_DATA_DIR", ".data")),
             supabase_database_url=os.getenv("OUTREACH_SUPABASE_DATABASE_URL") or None,
             database_url=os.getenv("OUTREACH_DATABASE_URL") or None,
