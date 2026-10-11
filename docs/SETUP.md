@@ -50,6 +50,8 @@ Model failures include a safe explanation in Telegram and saved job details. Inv
 
 To test a changed model key, stop the old process with **Ctrl+C**, activate `.venv`, and run `python -m app.main`. Open **http://127.0.0.1:8000**, sign in with your owner password, and check **Connections → Model**. Send **Hi** to your Telegram bot. This makes a real model call using your selected provider; `/new` is unnecessary. A successful reply verifies the live connection. If it fails, inspect the saved job's explanation before retrying.
 
+The running service does not reload code or `.env` automatically. If Connections still says `groq` after you selected `xai`, the old process is still running. Stop it in its original terminal before starting the new one; starting another copy does not replace it. Sign in to the dashboard again after restart, confirm the provider is `xai`, then retry your Telegram message. Saved failed jobs and their old errors remain in history.
+
 Generate the encryption key once:
 
 ```bash

@@ -11,6 +11,8 @@
 
 No live xAI/Groq requests, Telegram messages, or Gmail actions were made for this change. The owner's first Telegram request after restart must still verify xAI key validity, model permissions, available credits, and real response quality. The offline checks do not establish those account conditions.
 
+**Restart follow-up:** a reported Telegram failure was traced to the old server, started before the xAI implementation. The authenticated Connections endpoint still reported `groq`; the saved job contained two generic model failures, without enough information to identify the provider's rejection. Paused the queue, gracefully stopped the idle old process, and started the current service. Verified `/health` returned `ok`, Connections reported `xai` configured, and Telegram reported connected. The original failed run and its two recorded attempts were preserved; no new work was queued during checks. Restored the queue to its previous unpaused state. No model inference or Gmail action was performed. Setup instructions now explain how to recognize and restart an outdated process.
+
 ## Model failure explanations — October 10, 2026
 
 - **391 tests passed**, including local Chromium/OCR, with `RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/python -m pytest -o addopts='' -q`.
