@@ -198,6 +198,13 @@ class AgentService:
                 message = f"File ready: {document['filename']} ({len(document['content']['pages'])} pages/sections). Ask me a question about it, or inspect the text in the dashboard."
             else: message = (f"Run {run_id}: {result.state.current_step}.\nUse /review {run_id} or open the dashboard."
                        if result else f"Reply check complete: {count} new messages processed.")
+            if result and result.state.gmail_action == 'draft':
+                drafted = [prospect for prospect, outcome in result.state.outcomes.items() if outcome.status == 'drafted']
+                if drafted:
+                    message = (f"Saved {len(drafted)} Gmail draft(s) for your request.\n" +
+                        '\n'.join(f"To: {result.state.recipients[p].email} — {result.state.drafts[p].subject}" for p in drafted) +
+                        "\n\nReview and edit them in Gmail → Drafts, then click Send yourself. Nothing has been sent."
+                        f"\nhttps://mail.google.com/mail/#drafts\nRun: {run_id}")
             self._notify(job["id"], message)
         except asyncio.CancelledError:
             self.store.finish_job(job["id"], "interrupted", "Service stopped; inspect and retry.")

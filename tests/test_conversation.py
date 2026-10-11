@@ -243,6 +243,8 @@ def test_missing_search_is_reported_to_model_without_starting_outreach(make_run_
         assert 'website URL' in result(service, job)['text']
         prompt = json.loads(setup.client.calls[-1].input_text)
         assert not prompt['capabilities']['search']
+        assert prompt['capabilities']['max_drafts_per_run'] == 5
+        assert prompt['capabilities']['sending_enabled'] is False
         assert 'not configured' in prompt['observations'][0]['error']
         assert service.list_runs()['total'] == 0
     asyncio.run(check())
@@ -412,7 +414,7 @@ def test_cancellation_stops_chat_at_next_boundary(make_run_manager):
     asyncio.run(check())
 
 
-def test_conversation_proposal_hands_off_to_existing_approval_flow(tmp_path):
+def test_explicit_draft_request_saves_only_after_owner_starts_proposal(tmp_path):
     from app.demo import build_demo_manager, DemoModelClient, demo_request
     model = DemoModelClient()
     manager = build_demo_manager(settings=Settings(data_dir=tmp_path, telegram_owner_id=123))
@@ -436,6 +438,7 @@ def test_conversation_proposal_hands_off_to_existing_approval_flow(tmp_path):
         turn = service.store.jobs()[0]
         await service.execute_one()
         assert 'Start outreach' in result(service, turn)['text']
+        assert 'Batch limit: up to 5' in result(service, turn)['text']
         assert service.list_runs()['total'] == 0 and manager.gmail.calls == []
         await deliver(bot)
         controls = [button for _, payload in bot.client.calls for row in payload.get('reply_markup', {}).get('inline_keyboard', [])
@@ -449,16 +452,11 @@ def test_conversation_proposal_hands_off_to_existing_approval_flow(tmp_path):
         assert service.list_runs()['total'] == 1
         job = next(item for item in service.store.jobs() if item['kind'] == 'start')
         await service.execute_one()
-        assert service.state(job['run_id']).awaiting_approval
-        assert not any(call[0] in {'draft', 'send'} for call in manager.gmail.calls)
-        approval = service.state(job['run_id']).state.approval_requests[0]
-        from app.domain.workflow import ApprovalDecision
-        service.stage_decision(job['run_id'], ApprovalDecision(prospect_id=approval.prospect.id,
-            fingerprint=approval.fingerprint, version=approval.version, action='approve'))
-        service.submit_choices(job['run_id'], 'approve')
-        await service.execute_one()
+        assert not service.state(job['run_id']).awaiting_approval
         assert service.state(job['run_id']).state.outcomes['p1'].status == 'drafted'
         assert len([call for call in manager.gmail.calls if call[0] == 'draft']) == 1
+        assert not any(call[0] == 'send' for call in manager.gmail.calls)
+        assert any('click Send yourself' in message for message in await deliver(bot))
     try:
         asyncio.run(check())
     finally:

@@ -69,7 +69,7 @@
             name="goal"
             required
             maxlength="2000"
-            placeholder="Find professors studying AI observability for PhD outreach."
+            placeholder="Prepare email drafts for professors studying AI observability."
           ></textarea>
         </label>
         <div class="two-col">
@@ -140,17 +140,16 @@
             placeholder="Example University | professor@example.com"
           ></textarea></label
         ><label
-          >After your approval<select name="action">
-            <option value="draft">Create Gmail drafts</option>
+          >Draft destination<select name="action">
+            <option value="draft">Gmail Drafts — I review and send manually</option>
             <option value="none">Save approved results in the app</option>
-            <option value="send">Send emails (requires enablement)</option>
           </select></label
         >
         <p class="muted">
-          You will review the recipient and complete message before any Gmail
-          action.
+          Starting this run requests draft creation. The agent saves reviewed
+          Gmail drafts and notifies you; you review, edit, and click Send in Gmail.
         </p>
-        <button class="primary" type="submit">Start research</button>
+        <button class="primary" type="submit">Start drafting</button>
         <p id="run-error" role="alert"></p>
       </form>
     </dialog>

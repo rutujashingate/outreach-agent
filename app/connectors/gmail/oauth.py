@@ -143,7 +143,7 @@ class ConnectedGmail:
     async def ensure_account(self, email, account_id):
         status = self.status()
         if not status.get('connected') or status.get('account_id') != account_id or status.get('email', '').casefold() != (email or '').casefold():
-            raise ToolError('The connected Gmail account changed. Create a new run and approval.')
+            raise ToolError('The connected Gmail account changed. Create a new draft request.')
 
     async def _client(self):
         return GmailClient(self.account.http, await self.account.token(), self.account.invalidate)
@@ -151,7 +151,8 @@ class ConnectedGmail:
     async def search_threads(self, email, limit=3): return await (await self._client()).search_threads(email, limit)
     async def read_thread(self, thread_id): return await (await self._client()).read_thread(thread_id)
     async def create_draft(self, sender, recipient, draft): return await (await self._client()).create_draft(sender, recipient, draft)
-    async def send(self, sender, recipient, draft): return await (await self._client()).send(sender, recipient, draft)
+    async def send(self, sender, recipient, draft):
+        raise ToolError('Send manually from Gmail. This connector only creates drafts.')
 
 
 class BoundGmail(ConnectedGmail):
@@ -169,4 +170,5 @@ class BoundGmail(ConnectedGmail):
     async def search_threads(self, email, limit=3): return await self._call('search_threads', email, limit)
     async def read_thread(self, thread_id): return await self._call('read_thread', thread_id)
     async def create_draft(self, sender, recipient, draft): return await self._call('create_draft', sender, recipient, draft)
-    async def send(self, sender, recipient, draft): return await self._call('send', sender, recipient, draft)
+    async def send(self, sender, recipient, draft):
+        raise ToolError('Send manually from Gmail. This connector only creates drafts.')

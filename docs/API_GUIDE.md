@@ -33,7 +33,7 @@ Use a stable `Idempotency-Key` header for each intended queued action. Repeating
 | `PUT /api/queue` | Set `{"paused":true}` or `false`; does not interrupt an active job. |
 | `PUT /api/profile` | Save sender `name`, optional `email`, and `context` for new Telegram/dashboard requests. |
 | `POST /api/replies/check` | Queue an on-demand check; returns 202 with a job ID and no outreach run ID. |
-| `GET /api/connectors` | Gmail account status, Telegram health, browser availability, model/search configuration presence, local document/OCR availability, and sender profile. No tokens. |
+| `GET /api/connectors` | Gmail account status, Telegram health, browser availability, model/search configuration presence, document/OCR availability, sender profile, and storage backend/checkpoint mode. No tokens or database URLs. |
 | `POST /api/connectors/gmail/connect` | Return the Google consent URL for the logged-in browser session. |
 | `GET /api/connectors/gmail/callback` | Google’s registered redirect; validates the one-use state and owner session, then returns to the dashboard. |
 | `POST /api/connectors/gmail/disconnect` | Remove encrypted local credentials and attempt revocation at Google. |
@@ -46,7 +46,7 @@ Example JSON for `POST /api/runs`:
 
 ```json
 {
-  "goal": "Find AI infrastructure teams that could benefit from API observability.",
+  "goal": "Prepare outreach email drafts for AI infrastructure teams that could benefit from API observability.",
   "sender": {
     "name": "Your Name",
     "context": "Describe only the product or experience you actually offer."
@@ -61,9 +61,9 @@ Example JSON for `POST /api/runs`:
 }
 ```
 
-Gmail fills a missing sender address from the connected account. A supplied address must match it for draft/send actions. Known recipients can be supplied by prospect ID or matching target name, for example `{"Example AI":{"email":"person@example.com"}}`; these take precedence over discovered addresses. To work without Gmail, explicitly choose `gmail_action: "none"` and provide recipient addresses for contact checking. Draft is the UI default; the underlying reusable request record defaults to `none`.
+Posting a run is an explicit instruction to prepare emails. Gmail fills a missing sender address from the connected account. A supplied address must match it for draft creation. Known recipients can be supplied by prospect ID or matching target name, for example `{"Example AI":{"email":"person@example.com"}}`; these take precedence over discovered addresses. To work without Gmail, choose `gmail_action: "none"` and provide recipient addresses for contact checking. Draft is the UI default; the underlying reusable request record defaults to `none`.
 
-The trimmed goal must contain 1–2,000 characters. Booleans must be real JSON booleans, fields must be recognized, notes are bounded to 100,000 characters, and seed URLs to five. Invalid input returns 422. A configured browser is required for `use_browser`; a Brave key for `use_search`. Send requires `OUTREACH_ENABLE_SENDING=true` as well as an approved send-mode request.
+The trimmed goal must contain 1–2,000 characters. Booleans must be real JSON booleans, fields must be recognized, notes are bounded to 100,000 characters, and seed URLs to five. Invalid input returns 422, including `gmail_action: "send"`. A configured browser is required for `use_browser`; a Brave key for `use_search`. Requested Gmail drafts are saved after automated review and contact checks. The owner reviews and sends them manually in Gmail; no configuration flag enables agent sending.
 
 ## Upload and attach files
 
@@ -77,7 +77,7 @@ Include references when creating a run:
 
 ```json
 {
-  "goal": "Find research groups that match my uploaded resume.",
+  "goal": "Prepare outreach drafts for research groups that match my uploaded resume.",
   "attachments": [
     {"document_id": "COPY_32_CHARACTER_ID_FROM_UPLOAD", "purpose": "background"}
   ],
@@ -91,6 +91,8 @@ Include references when creating a run:
 Use `purpose: "research"` for prospect evidence; `background` describes the sender. At most five unique file references are accepted. Unknown files receive 404; failed files must be retried or removed before starting. A queued extraction runs ahead of its outreach job on the shared worker. Uploading alone makes no model call. Run details include `attached_documents` metadata and `state.documents` with loaded, saved evidence. Research references look like `document:FILE_ID#page=2`. Addresses found in private files pause for owner selection.
 
 ## Review and resume
+
+New `gmail_action: "draft"` runs save reviewed drafts without an in-app approval pause. Their outcomes include the Gmail draft ID and a `message_fingerprint` binding the account, recipient, content, and action. Review/edit/send the actual saved draft in Gmail. The following controls remain for `none` (app-only) drafts and older pending approvals; old send-mode runs are blocked.
 
 Read `state.approval_requests` from the run details. Use the exact current `prospect.id`, `version`, and `fingerprint`:
 
@@ -136,7 +138,7 @@ Run status is `queued`, `running`, `paused`, `completed`, `failed`, or `cancelle
 
 401 means authentication is needed; 403 means a browser request failed its origin/token check; 404 means an unknown run/route; 409 means conflicting or stale work; 422 means invalid input; 429 means a request/budget limit; 502/503 means a connector/configuration problem. Job errors retain a generic error type; inspect per-run events and Connections for context.
 
-An uncertain Gmail result is not automatically retryable. The action ledger and contact lock remain in place. Inspect Gmail manually before any maintenance resolution. Statistics count **sent** only after a successful Gmail send response; an approval alone is not a sent email.
+An uncertain Gmail result is not automatically retryable. The action ledger and contact lock remain in place. Inspect Gmail manually before any maintenance resolution. Statistics count **drafts** only after a confirmed Gmail draft response. `sent` retains historical agent-send records, if present; new agent sends are blocked. Manual Gmail sends are not automatically reconciled into that counter.
 
 ## Fake Telegram walkthrough
 

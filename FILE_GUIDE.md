@@ -5,15 +5,17 @@ This guide explains the working application in plain language. The [setup guide]
 ## Follow one request
 
 1. You talk normally to the Telegram bot. `ConversationService.queue()` saves your message, and a LangGraph conversation loop answers, reads files/public pages, searches when available, or proposes outreach. It remembers the last six exchanges across restarts. `/new` optionally resets this context; `/guided` opens the old step-by-step questions. Dashboard requests still enter outreach directly.
-2. If you request outreach, check the proposed request and press **Start outreach**. `AgentService.start()` validates its choices, saves a run and a job, and returns their identifiers immediately. A **run** holds results; a **job** is one queued piece of work. Uploaded-file jobs extract text locally before the run uses it. Ordinary conversation ends with a reply and does not require an outreach run.
+2. If you explicitly request email drafts, check the proposed request and press **Start outreach**. `AgentService.start()` validates its choices, saves a run and a job, and returns their identifiers immediately. A **run** holds results; a **job** is one queued piece of work. Uploaded-file jobs extract text locally before the run uses it. Ordinary conversation, research, and file questions do not create emails.
 3. One worker takes the job. `RunManager` opens the saved **LangGraph workflow**, an ordered set of steps with explicit choices about where to go next.
 4. The agent loads ready files, interprets the goal using relevant excerpts, researches uploaded/public evidence, qualifies prospects, resolves addresses, checks relationship history and contact rules, then writes and reviews messages.
-5. Missing or ambiguous addresses pause the run for your selection. Reviewed drafts pause for your decisions. The database saves both pauses so restarting does not lose them.
-6. You select approve, reject, or edit for **every** pending prospect, then submit the batch. Telegram and the dashboard share these choices. An edit goes through review and needs a fresh approval.
-7. The worker verifies the current account, recipient, exact message, version, requested action, and contact rules. It records the Gmail action before and after calling Gmail. An uncertain result stays blocked for inspection.
+5. Missing or ambiguous addresses pause the run for your selection. Requested Gmail drafts continue after automated review. App-only drafts and older paused approvals retain the shared approve/reject/edit controls.
+6. The worker checks the connected account, recipient, exact message, contact policy, and action history. It saves each requested Gmail draft once and records the result. An uncertain write stays blocked for inspection.
+7. The bot tells you when drafts are saved. You open Gmail, review/edit the actual drafts, and click **Send** yourself. The agent cannot send emails; the former sending flag cannot turn that on.
 8. The dashboard displays the same saved run, sources, outcomes, events, and usage. No second research run is needed to switch interfaces.
 
-For example, “Find professors studying AI observability” can become a sourced professor record and a reviewed email. Approval in draft mode creates a Gmail draft; it does not send it. The included demo uses a fictional university and simulated services.
+For example, “Find professors studying AI observability” can get a research answer. “Prepare email drafts for these professors” proposes drafting. The default limit is five qualified prospects per run, so ten emails need smaller batches or a deliberate limit change. The included demo uses a fictional university and simulated services.
+
+**State** means the information needed to continue work: your goal, evidence, drafts, current step, pending choices, and outcomes. It is saved in local SQLite by default or in one Supabase Postgres database when configured. Changing stores does not copy old records automatically; see [Supabase setup](docs/SUPABASE.md).
 
 ## Phase history: what changed when
 
@@ -33,6 +35,7 @@ Phases 1–30 built and refined the original foundation, structured records, res
 | **40 — Model errors and budget explanations** | Updated model error handling, chat notifications, dashboard budget labels, tests, and setup documentation. | Known provider failures explain the cause without exposing secrets. Blocked models and rate limits stop without an automatic retry. Reserved budget is labeled separately from billing. The 391-test suite passes. |
 | **After phase 40 — Prepare xAI configuration** | Added setup fields to `.env.example` and the ignored local `.env`; updated this guide. | This earlier change only reserved a place for the key and model choices. Phase 41 below connects those settings to the application. |
 | **41 — Connect Grok on xAI** | Added `app/llm/xai_client.py` and its tests. Updated provider selection, safe errors, dashboard connection checks, test isolation, environment template, README, and setup/validation guides. | Telegram conversation and outreach can use Grok through the same saved workflow, budgets, and approvals. All 425 tests pass, covering the model-to-approval path, replies, duplicates, safe failures, and tokens. Live account acceptance still needs the owner's Telegram test. |
+| **42 — Supabase state and requested Gmail drafts** | Added private Postgres configuration and restart checks; changed the email path to request-only drafts and manual Gmail sending. Updated Telegram, dashboard, tests, setup, and diagram. Detailed file explanations appear below. | State can use one hosted database. Requested drafts are saved once and announced; normal chat does not draft, and agent sending is blocked. Cloud connection still needs the owner’s project URL. |
 
 ## Application entry and configuration
 
@@ -75,8 +78,8 @@ A **node** is a small workflow step. It receives the current state and the run�
 | `strategy.py` | `strategy_node()` creates a grounded approach for each allowed prospect. |
 | `writing.py` | `writing_node()` drafts or revises a message using the goal, sender background, strategy, and evidence. |
 | `review.py` | `review_node()` checks drafts and records review results. A failing draft can be revised within the shared revision limit. |
-| `approval.py` | `prepare_approval()` builds the exact review cards and message versions. `human_approval()` pauses and applies a complete decision batch. `validate_decisions()` rejects missing, duplicate, or stale decisions. Edits require review and another approval. |
-| `external.py` | `external_node()` rechecks approval, account identity, contact policy, and the durable action ledger before draft/send calls. `finish_node()` saves outcomes and interaction history. An uncertain write is recorded without automatically repeating it. |
+| `approval.py` | `prepare_approval()` skips the in-app approval pause for explicitly requested Gmail drafts. App-only drafts still get exact-message cards. `human_approval()` applies a complete decision batch, and `validate_decisions()` rejects stale choices. This also preserves older pending approvals. |
+| `external.py` | `external_node()` accepts reviewed state, checks account identity, contact policy, and saved action history, and returns confirmed draft outcomes. It rejects sends. App-only completion still requires approval. `finish_node()` saves outcomes and interaction history. An uncertain write is recorded without repeating it. |
 | `common.py` | `for_each()` limits concurrent prospect work and records individual failures. `allowed_prospects()` filters eligible targets. `failure()` creates a consistent failed outcome. Cancellation propagates instead of becoming an ordinary prospect failure. |
 
 ### Components and prompts
@@ -137,14 +140,14 @@ A **connector** is an adapter between our application and an external service. F
 | `app/services/limits.py` | `Limits` defines page/call counts, timeouts, concurrency, contact windows, revision limits, and estimated spending. Ordinary chat has a smaller default allowance: six model attempts and five tool selections per message, also constrained by the overall limits. Estimated cost is a configured per-call reservation, not a provider invoice. |
 | `app/storage/models.py` | Defines tables for contacts, memory, interactions, runs, traces, action locks, and the external-action ledger. A ledger is the durable record used to recognize an already attempted action. |
 | `app/storage/control.py` | Defines job, run-metadata, key/value, Telegram inbox, and outbox tables. `ControlStore.enqueue()` saves a run and initial job together, labeling chat separately from outreach and recording its latest turn in the same transaction. `claim()` honors queue pause. `recover()` marks interrupted work. Other methods persist conversations, approval selections, update offsets, page counts, and encrypted connector records. A repeated request key returns its original job. |
-| `app/storage/database.py` | `create_database()` opens SQLite by default and applies application migrations. Existing relationships are retained. |
+| `app/storage/database.py` | `create_database(url, private_schema=False)` opens SQLite or Postgres and applies existing migrations. Supabase uses the private `outreach` schema and a small connection pool. Failures close the connection instead of switching stores. |
 | `app/storage/repository.py` | Reads/writes relationship facts, outcomes, runs, budgets, leases, and action claims. It is reused by the workflow, reply processing, and shared service. |
-| `app/storage/checkpoints.py` | `open_checkpointer()` opens LangGraph’s progress store. SQLite is the service default. Its serializer recognizes relocated domain records and earlier record names. Memory and optional Postgres adapters remain for tests/earlier integrations. |
+| `app/storage/checkpoints.py` | `open_checkpointer(settings)` opens LangGraph’s progress store. SQLite is the default; a Supabase URL selects Postgres in the same `outreach` schema as app records. Its serializer recognizes current and earlier domain record names. |
 | `app/storage/events.py` | `trace()` writes timestamped events and updates the currently running node. `events()` returns a run’s ordered trace. Events record useful metadata, not credentials or full model prompts. |
 | `migrations/env.py` | Connects Alembic, the migration runner, to the application’s existing database connection. |
 | `migrations/versions/v001_connected_service.py` | The first versioned migration adopts earlier tables without discarding data, adds service tables, and backfills metadata for existing runs. It deliberately has no destructive automatic downgrade. |
 
-The normal local installation uses **SQLite only**, with two files: `relationships.sqlite3` stores application records and `checkpoints.sqlite3` stores LangGraph progress. It does not require PostgreSQL. Both live under `OUTREACH_DATA_DIR`; the demo uses its `demo/` subdirectory. Credentials are encrypted in the application database; their encryption key stays in your environment.
+With no Supabase URL, the local installation uses **SQLite**, with two files: `relationships.sqlite3` stores application records and `checkpoints.sqlite3` stores LangGraph progress. A configured Supabase URL instead puts both kinds of state in one hosted Postgres database; local records are preserved but not copied. SQLite files live under `OUTREACH_DATA_DIR`; the demo uses its `demo/` subdirectory. Credentials are encrypted in the application database; their encryption key stays in your environment.
 
 ## Dashboard and deployment files
 
@@ -154,7 +157,7 @@ The normal local installation uses **SQLite only**, with two files: `relationshi
 | `app/web/static/index.html` | The dashboard’s page structure: login, navigation, content area, and run/edit forms. |
 | `app/web/static/app.js` | Fetches shared-service data, renders views, stages decisions, and submits controls. The new-run form accepts known addresses; run details retain completed drafts, reviews, decisions, and source retrieval times. Refreshes the visible view every five seconds while leaving active form entry alone. `node()` creates text safely instead of interpreting external content as HTML. Run submission preserves a request key after a lost response. |
 | `app/web/static/app.css` | Styles the responsive dashboard, review cards, forms, tables, status badges, and compact logs. |
-| `Dockerfile` | Builds the Python service with matching Chromium dependencies and runs it as a non-root user. |
+| `Dockerfile` | Builds the service with Postgres packages, Chromium dependencies, and local OCR, then runs it as a non-root user. |
 | `compose.yaml` | Starts one container with persistent data, local port binding, health checks, graceful shutdown, and browser sandbox configuration. |
 | `.dockerignore` | Excludes local credentials, databases, Git history, and environments from the build context. |
 | `docker/seccomp_profile.json` | Upstream Playwright system-call profile allowing Chromium’s sandbox to create user namespaces. |
@@ -163,7 +166,7 @@ The normal local installation uses **SQLite only**, with two files: `relationshi
 | `docs/SETUP.md` | Local configuration, Telegram/Google setup, daily operations, and Docker instructions. |
 | `docs/API_GUIDE.md` | Current authenticated endpoints and request/response examples. |
 | `docs/VALIDATION.md` | Records what was actually tested and the remaining live-environment checks. |
-| `docs/assets/workflow.mmd`, `workflow.svg` | Editable Mermaid flowchart and its rendered image. Shows the actual shared request path and approval loop. |
+| `docs/assets/workflow.mmd`, `workflow.svg` | Editable Mermaid flowchart and its rendered image. Shows ordinary chat, explicit draft requests, saved state, and final review/sending by the owner in Gmail. |
 | `plan.md` (local only) | The working direction, defaults, and acceptance criteria for this checkout. It is ignored by Git; the shared README, setup guide, phase history, and validation record document the published project. |
 | `CONTRIBUTING.md`, `LICENSE` | Contributor workflow and MIT licensing terms. Contributors retain their copyright and license contributions under MIT. |
 
@@ -194,7 +197,7 @@ The validation record lists completed automated suites, including optional Chrom
 | `tests/test_evaluations.py` | Four fictional scenarios score correctly; missing outputs, unsupported claims, wrong sources, and broken revision limits are detected. |
 | `evals/cases.json` | Four reference scenarios: jobs, academic outreach, sales, and networking. |
 | `evals/run.py` | `evaluate()` runs each scenario in an isolated workflow and returns scores, duration, calls, and estimated cost. The default uses scripted responses. `--live` explicitly uses an exported model configuration and consumes provider credits; it does not perform Gmail actions. |
-| `evals/scoring.py` | `score_run(state, reference)` compares targets, sources, qualification, memory, hooks, writing constraints, reviews, and workflow approval rules. It returns numbers from 0 to 1. |
+| `evals/scoring.py` | `score_run(state, reference)` compares targets, sources, qualification, memory, writing, and reviews. Saved drafts must match their account/content fingerprint and contact checks; agent sends fail the workflow rule. Missing supporting records also fail instead of crashing the evaluation. |
 
 Use `python -m pytest` for ordinary offline checks, `RUN_BROWSER_TESTS=1 python -m pytest` to include Chromium, and `python -m evals.run` for the four simulated evaluations. Real Telegram delivery, Google consent, and live Gmail writes are recorded separately in the validation guide.
 
@@ -319,3 +322,50 @@ The existing per-call reservation remains a local budget estimate, not xAI prici
 **Restart troubleshooting:** a later Telegram failure came from a server process started before the xAI changes. Its authenticated Connections response still reported `groq`, despite `.env` selecting `xai`. `docs/SETUP.md` now explains that editing files does not reload a running service, how to check the active provider, and why old failed jobs remain in history. `docs/VALIDATION.md` records the graceful restart: health passed, the active provider became `xai`, Telegram connected, and the failed run remained saved. The queue was paused during checks and restored afterward; no paid model request was made. This is an operating instruction, not a new workflow phase or a change to credentials.
 
 **Account-access troubleshooting:** the next owner-triggered retry reached xAI but received `403`, meaning access was denied. A read-only key-status check accepted the key and confirmed its model/endpoint permissions, while reporting `team_blocked: true`. `docs/SETUP.md` explains that this flag belongs to the xAI team and does not reveal whether credits or another account restriction caused it. `docs/VALIDATION.md` records the confirmed flags and the remaining live check. The application stopped after one attempt; its budgets and credentials were not changed. No additional model generation was requested during this diagnosis.
+
+## Phase 42 — Supabase state and requested Gmail drafts
+
+This phase changes the current email behavior: the agent prepares emails only after your instruction and the **Start outreach** action. A search or file question remains conversation. Requested drafts pass contact checks and automated review, are saved in Gmail, and trigger a notification. You review, edit, and send them in Gmail. No agent action can send. Older phase descriptions above record what worked at that time; they do not override this policy.
+
+Supabase is an optional home for the existing state. It uses one PostgreSQL database for application tables and LangGraph checkpoints. No extra Supabase API key, new login system, or file-storage service was added. A schema is a named group of tables; ours is called `outreach` and stays outside the public Data API. Row-level security and removed browser-role grants protect these tables, while the authenticated Python server connects as their owner.
+
+| New or changed file | Main inputs, outputs, and connection to the application |
+|---|---|
+| `app/settings.py` | `from_env()` reads the optional `OUTREACH_SUPABASE_DATABASE_URL`. `use_one_supabase_database()` converts it into both database adapter settings and selects Postgres checkpoints. It rejects conflicting URLs and hides database credentials in printed settings/errors. The old sending environment switch is ignored; `sending_enabled` can only be false. |
+| `app/storage/postgres.py` | `connection_urls(text)` checks and converts the copied URL without printing it. It requires encrypted remote connections and rejects transaction pooler port 6543. `prepare_connection()` selects the private schema. `protect_tables(engine)` removes Data API access and enables row-level security. `database_instance_lock(engine)` holds a database lock so a second host cannot start another worker against the same records. |
+| `app/storage/database.py` | `create_database()` now accepts `private_schema=True` for Supabase, applies existing migrations, and limits open Postgres connections. It returns a SQLAlchemy engine, the application's database connection manager. |
+| `app/storage/checkpoints.py` | `open_checkpointer()` opens a session to the same private schema for LangGraph. A checkpoint contains the run's saved progress; it is separate from the job record that tells the worker what to execute. |
+| `app/services/runtime.py` | `open_runtime()` uses the configured store, holds the database instance lock, opens the checkpoint connection, and protects all tables including those created by LangGraph. It closes these resources together. |
+| `app/main.py` | Demo configuration clears the Supabase setting and uses its separate local SQLite files, preventing a fake walkthrough from writing to the real cloud database. |
+| `app/domain/workflow.py` | `WorkflowRequest` accepts `none` or `draft` as destinations; new `send` requests fail validation. `WorkflowState` still reads historical send records. `Outcome.message_fingerprint` records the exact saved account, recipient, message, and action; it does not pretend the owner already reviewed the email. |
+| `app/agent/prompts/conversation.py` | Explains that drafting needs an explicit request. “Find opportunities” uses research tools; “Create email drafts” can propose outreach. It tells the model to explain the configured batch limit and ask about a smaller batch instead of promising ten emails when only five prospects are allowed. |
+| `app/services/conversation.py` | `execute()` supplies the actual draft limit and disabled sending capability to the conversation model. `response()` shows the destination and batch limit. `start_proposal()` remains the only conversation handoff to drafting and prevents repeated button clicks from duplicating runs. |
+| `app/agent/nodes/approval.py` | `prepare_approval()` lets requested Gmail drafts continue after automated review. App-only drafts and old paused decisions keep their previous review controls. No fabricated human approval is saved. |
+| `app/agent/nodes/external.py` | `external_node()` saves reviewed drafts only after account and contact checks. It records a fingerprint and Gmail draft ID, reuses confirmed results on replay, and keeps uncertain writes blocked. Saving a draft does not update “last contacted,” since nobody has received it yet. |
+| `app/services/runs.py` | `validate_request()` rejects agent sending even for internal callers that bypass normal input validation. `_execute()` also blocks resuming legacy send-mode records before any model or Gmail call. |
+| `app/connectors/gmail/oauth.py` | `ConnectedGmail.send()` and `BoundGmail.send()` refuse immediately, without requesting tokens or contacting Google. Draft creation still uses the existing encrypted credentials and account lock. The low-level protocol client's old send method remains for historical tests but is not reachable through the connected agent. |
+| `app/services/application.py` | `execute_one()` counts confirmed draft outcomes and queues a notification with recipient/subject details and the Gmail Drafts link. It tells the owner to review, edit, and click Send manually. |
+| `app/connectors/telegram/bot.py` | Guided setup offers Gmail drafts or app-only drafts, with no send option. Help explains request-only drafting. `/review` points to Gmail for completed drafts and retains old pending review controls. |
+| `app/web/routes/control.py` | `connections()` returns the storage backend, checkpoint type, and schema name without returning the URL. This lets the owner verify whether SQLite or Supabase is active. |
+| `app/web/static/index.html`, `app.js` | The request form labels draft destinations and removes sending. Connections shows **Saved state**. Completed draft runs show **Open Gmail Drafts** and manual review instructions. The old sent counter is labeled as historical; manual Gmail sends are not inferred from saved drafts. |
+| `evals/scoring.py` | `score_run()` checks saved drafts against their account/message fingerprint, automated review, and contact decision. Missing support or any agent-send outcome lowers the workflow-rule score. |
+| `Dockerfile` | Installs the existing `postgres` dependency extra so the packaged service can use the same Supabase configuration. The container image itself still needs a Docker-capable host for a build check. |
+| `.env.example`, local `.env` | Add one blank optional Supabase URL. The shared template removes the old sending switch. Local credentials, operating limits, and database files are preserved; the local environment file is never committed. |
+| `docs/SUPABASE.md` | Project creation, session-pooler URL, startup, connection verification, state explanation, and backup instructions. It clearly states that SQLite records are preserved but not automatically migrated. |
+| `README.md`, `docs/SETUP.md`, `docs/API_GUIDE.md`, `docs/VALIDATION.md`, `docs/assets/workflow.mmd`, `workflow.svg` | Describe the current draft-only flow and storage choices. The diagram shows human review and sending outside the agent. Validation distinguishes real local Postgres from a cloud account connection. |
+
+For example: “Create outreach drafts for these five companies” → owner starts the proposal → sources and contact checks → automated draft review → saved Gmail drafts → notification → owner reviews/sends in Gmail. Qualification, recipient evidence, and budgets can result in fewer drafts; the app never increases spending limits to meet a requested count.
+
+| Changed tests | What they check in everyday language |
+|---|---|
+| `tests/test_supabase_storage.py` | URL validation and secret hiding; real temporary Postgres stores jobs/checkpoints and resumes a paused run after reopening; another service is blocked; browser roles cannot access private tables; a saved Gmail draft is reused after restart instead of being created twice. The database is local and disposable, with no cloud credentials. |
+| `tests/test_full_workflow.py` | Requested Gmail drafts need no extra app approval. Failed review and contact opt-outs prevent creation. Replaying a draft reuses its result; uncertain writes stay blocked. Old sending flags and saved send-mode runs cannot send. |
+| `tests/test_full_api.py` | The authenticated API rejects `gmail_action: "send"` before queuing work. |
+| `tests/test_gmail_oauth.py` | Account changes block draft writes. Both connected send methods fail before any HTTP request, even with expired credentials. |
+| `tests/test_conversation.py` | An email proposal creates nothing until the owner starts it. Repeated starts create one run; completion produces one draft and manual-send guidance. The model receives the actual batch limit. Existing ordinary-chat/file checks still show no automatic outreach. |
+| `tests/test_telegram.py` | Guided browser/file flows save requested fake Gmail drafts, return the same saved run through dashboard data, notify the owner, and ignore repeated starts. |
+| `tests/test_service.py` | Counts a draft only after Gmail confirms creation; no send or invented human-approval count is added. |
+| `tests/test_server_recovery.py` | Cancellation during draft creation lets the in-flight result finish recording before stopping. |
+| `tests/test_evaluations.py` | Wrong accounts/actions, missing review records, and agent sends fail the workflow checks. |
+
+**Available now:** local SQLite and optional Supabase configuration, durable state, explicit requested drafts, owner notifications, and manual sending. **Still account-dependent:** creating your Supabase project, adding its URL, connecting Gmail in the selected store, and resolving the model provider's account access. Existing SQLite records are not migrated by this change. Additional orchestration/approval features have not been added. Completed checks are recorded in [validation](docs/VALIDATION.md).

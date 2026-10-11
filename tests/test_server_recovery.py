@@ -50,9 +50,6 @@ def test_cancelling_during_gmail_records_the_completed_action(make_run_manager,w
     setup=make_run_manager();service=AgentService(setup.manager)
     job=service.start(workflow_data.request.model_copy(update={'gmail_action':'draft'}),'start')
     async def exercise():
-        await service.execute_one()
-        item=service.state(job['run_id']).state.approval_requests[0]
-        service.decisions(job['run_id'],ApprovalSubmission(decisions=[{'prospect_id':'p1','version':item.version,'fingerprint':item.fingerprint,'action':'approve'}]),'approve')
         original=setup.gmail.create_draft
         async def create(*args):
             service.cancel(job['run_id'])

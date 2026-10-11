@@ -99,17 +99,36 @@ def test_decision_resumes_same_run_without_repeating_models(make_run_manager, wo
     assert setup.repository.history("contact@example.com")[0]["kind"] == outcome
 
 
-def test_approved_draft_creates_one_fake_gmail_draft(make_run_manager, workflow_data):
+def test_requested_draft_is_saved_without_inventing_human_approval(make_run_manager, workflow_data):
     setup = make_run_manager()
     request = workflow_data.request.model_copy(update={"gmail_action": "draft"})
     async def run():
-        paused = await setup.manager.start(request)
-        assert setup.gmail.calls == []
-        return await setup.manager.resume(paused.state.run_id, decide(paused))
+        return await setup.manager.start(request)
     completed = asyncio.run(run())
     assert completed.state.outcomes["p1"].status == "drafted"
     assert completed.state.outcomes["p1"].external_id
+    assert not completed.awaiting_approval and completed.state.human_decisions == {}
     assert [action for action, _ in setup.gmail.calls] == ["draft"]
+
+
+def test_old_sending_flag_cannot_enable_sending(monkeypatch):
+    monkeypatch.setenv('OUTREACH_ENABLE_SENDING', 'true')
+    assert Settings.from_env().sending_enabled is False
+    with pytest.raises(ValueError):
+        Settings(sending_enabled=True)
+
+
+def test_saved_legacy_send_run_cannot_resume(make_run_manager, workflow_data):
+    from app.domain.workflow import WorkflowState
+    setup = make_run_manager()
+    state = WorkflowState(run_id='legacy-send', **workflow_data.request.model_dump())
+    state.gmail_action = 'send'
+    setup.repository.save_run(state, 'failed')
+    with pytest.raises(RunConflict, match='draft-only'):
+        asyncio.run(setup.manager.retry(state.run_id))
+    assert setup.client.calls == [] and setup.gmail.calls == []
+    assert setup.repository.acquire_run(state.run_id, 60)
+    setup.repository.release_run(state.run_id)
 
 
 def test_human_edit_is_reviewed_and_needs_a_fresh_approval(make_run_manager, workflow_data):
@@ -133,15 +152,17 @@ def test_human_edit_is_reviewed_and_needs_a_fresh_approval(make_run_manager, wor
     assert setup.gmail.calls == []
 
 
-def test_repeated_review_rejection_stops_at_one_revision(make_run_manager, workflow_data):
+@pytest.mark.parametrize('destination', ['none', 'draft'])
+def test_repeated_review_rejection_stops_at_one_revision(make_run_manager, workflow_data, destination):
     responses = deepcopy(workflow_data.responses)
     responses[-1].update(approved=False, issues=["Unsupported statement."])
     responses.extend([deepcopy(responses[-2]), deepcopy(responses[-1])])
     setup = make_run_manager(responses=responses)
-    result = asyncio.run(setup.manager.start(workflow_data.request))
+    result = asyncio.run(setup.manager.start(workflow_data.request.model_copy(update={'gmail_action': destination})))
     assert not result.awaiting_approval
     assert result.state.outcomes["p1"].status == "manual_review"
     assert result.state.revision_counts == {"p1": 1}
+    assert setup.gmail.calls == []
     assert sum(call.response_model.__name__ == "EmailDraft" for call in setup.client.calls) == 2
 
 
@@ -168,60 +189,59 @@ def test_model_output_for_wrong_prospect_cannot_advance(make_run_manager, workfl
 
 def test_send_is_disabled_before_any_model_or_tool_call(make_run_manager, workflow_data):
     setup = make_run_manager()
-    with pytest.raises(RunConflict, match="disabled"):
+    with pytest.raises(RunConflict, match="only creates drafts"):
         asyncio.run(setup.manager.start(workflow_data.request.model_copy(update={"gmail_action": "send"})))
     assert setup.client.calls == setup.gmail.calls == []
 
 
-def test_opt_out_while_paused_prevents_approved_send(make_run_manager, workflow_data):
-    setup = make_run_manager(settings=Settings(checkpoint_backend="memory", sending_enabled=True))
-    request = workflow_data.request.model_copy(update={"gmail_action": "send"})
+def test_opt_out_before_gmail_write_prevents_draft(make_run_manager, workflow_data):
+    setup = make_run_manager()
     async def run():
-        paused = await setup.manager.start(request)
+        paused = await setup.manager.start(workflow_data.request)
         setup.repository.update_contact("contact@example.com", opted_out=True)
-        return await setup.manager.resume(paused.state.run_id, decide(paused))
+        state = paused.state.model_copy(update={'gmail_action':'draft'})
+        context = WorkflowContext(FakeModelClient([]), setup.repository, setup.manager.settings.limits, gmail=setup.gmail)
+        return await external_node(state, Runtime(context=context))
     result = asyncio.run(run())
-    assert result.state.outcomes["p1"].status == "blocked"
+    assert result['outcomes']["p1"].status == "blocked"
     assert setup.gmail.calls == []
 
 
-def test_replaying_send_node_returns_recorded_result_without_another_send(make_run_manager, workflow_data):
-    settings = Settings(checkpoint_backend="memory", sending_enabled=True)
+def test_replaying_draft_node_returns_recorded_result_without_another_write(make_run_manager, workflow_data):
+    settings = Settings(checkpoint_backend="memory")
     setup = make_run_manager(settings=settings)
     async def run():
-        paused = await setup.manager.start(workflow_data.request.model_copy(update={"gmail_action": "send"}))
-        completed = await setup.manager.resume(paused.state.run_id, decide(paused))
+        completed = await setup.manager.start(workflow_data.request.model_copy(update={"gmail_action": "draft"}))
         replay = completed.state.model_copy(update={"outcomes": {}}, deep=True)
         context = WorkflowContext(FakeModelClient([]), setup.repository, settings.limits,
-                                  gmail=setup.gmail, sending_enabled=True)
+                                  gmail=setup.gmail)
         result = await external_node(replay, Runtime(context=context))
         assert result["outcomes"]["p1"] == completed.state.outcomes["p1"]
         return completed
     completed = asyncio.run(run())
-    assert completed.state.outcomes["p1"].status == "sent"
-    assert [action for action, _ in setup.gmail.calls] == ["send"]
-    assert setup.repository.contact("contact@example.com")["last_contact_at"]
+    assert completed.state.outcomes["p1"].status == "drafted"
+    assert [action for action, _ in setup.gmail.calls] == ["draft"]
+    assert not setup.repository.contact("contact@example.com")["last_contact_at"]
 
 
-def test_uncertain_send_is_not_retried(make_run_manager, workflow_data):
+def test_uncertain_draft_is_not_retried(make_run_manager, workflow_data):
     class UncertainGmail(FakeGmailClient):
-        async def send(self, *args):
-            await super().send(*args)
+        async def create_draft(self, *args):
+            await super().create_draft(*args)
             raise ToolError("Response was lost after acceptance.")
     gmail = UncertainGmail()
-    settings = Settings(checkpoint_backend="memory", sending_enabled=True)
+    settings = Settings(checkpoint_backend="memory")
     setup = make_run_manager(settings=settings, gmail=gmail)
     async def run():
-        paused = await setup.manager.start(workflow_data.request.model_copy(update={"gmail_action": "send"}))
-        completed = await setup.manager.resume(paused.state.run_id, decide(paused))
+        completed = await setup.manager.start(workflow_data.request.model_copy(update={"gmail_action": "draft"}))
         assert completed.state.outcomes["p1"].status == "uncertain"
         replay = completed.state.model_copy(update={"outcomes": {}}, deep=True)
         context = WorkflowContext(FakeModelClient([]), setup.repository, settings.limits,
-                                  gmail=gmail, sending_enabled=True)
+                                  gmail=gmail)
         result = await external_node(replay, Runtime(context=context))
         assert result["outcomes"]["p1"].status == "blocked"
     asyncio.run(run())
-    assert [action for action, _ in gmail.calls] == ["send"]
+    assert [action for action, _ in gmail.calls] == ["draft"]
     assert setup.repository.has_pending_action("contact@example.com")
 
 

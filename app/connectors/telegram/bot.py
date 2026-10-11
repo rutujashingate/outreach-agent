@@ -39,8 +39,7 @@ class TelegramBot:
     def _action_prompt(self, conversation):
         conversation['stage'] = 'action'
         entries = [('Save in app', {'wizard': 'none', 'conversation': conversation['id']}), ('Gmail draft', {'wizard': 'draft', 'conversation': conversation['id']})]
-        if self.service.manager.settings.sending_enabled: entries.append(('Send after approval', {'wizard': 'send', 'conversation': conversation['id']}))
-        self.say('What should happen after you approve the message?', entries)
+        self.say('Where should I save the drafts you requested? You will review and send Gmail drafts yourself.', entries)
 
     def _review(self, run_id):
         response = self.service.state(run_id)
@@ -49,6 +48,9 @@ class TelegramBot:
             self.say(f'Run {run_id} needs recipient choices. Use /recipients {run_id} to choose addresses, or use the dashboard.')
             return
         if not response.awaiting_approval:
+            if any(outcome.status == 'drafted' for outcome in state.outcomes.values()):
+                self.say(f'Run {run_id}: drafts saved. Review and send them yourself in Gmail → Drafts.\nhttps://mail.google.com/mail/#drafts')
+                return
             self.say(f'Run {run_id}: {state.current_step}. No draft is waiting for approval.')
             return
         for item in state.approval_requests:
@@ -191,7 +193,7 @@ class TelegramBot:
             if command == '/start':
                 self._chat_conversation(conversation)
                 conversation['stage'] = 'chat'
-            self.say('Hi! Just send me a message. Ask a question, share a website, or upload a file and tell me what you need. I remember recent messages, so you can ask follow-up questions. No /new is needed.\n\nOptional controls:\n/new — clear the conversation and start fresh\n/chat — leave guided questions and talk normally\n/guided — step-by-step outreach setup\n/runs — recent outreach runs\n/review RUN_ID — review drafts\n/recipients RUN_ID — choose addresses\n/status RUN_ID — progress\n/retry RUN_ID — retry failed work\n/cancel RUN_ID — stop a run\n/replies — check tracked replies\n/account — Gmail status\n/files — attached files\n/clearfiles — detach files\n/retryfile FILE_ID — retry reading\n\nEmail actions still need your review and approval. Use the dashboard for connector setup and logs.')
+            self.say('Hi! Just send me a message. Ask a question, share a website, or upload a file and tell me what you need. I remember recent messages, so you can ask follow-up questions. No /new is needed.\n\nOptional controls:\n/new — clear the conversation and start fresh\n/chat — leave guided questions and talk normally\n/guided — step-by-step outreach setup\n/runs — recent outreach runs\n/review RUN_ID — review drafts\n/recipients RUN_ID — choose addresses\n/status RUN_ID — progress\n/retry RUN_ID — retry failed work\n/cancel RUN_ID — stop a run\n/replies — check tracked replies\n/account — Gmail status\n/files — attached files\n/clearfiles — detach files\n/retryfile FILE_ID — retry reading\n\nI prepare emails only when you request them and start the proposal. Requested Gmail drafts are saved for you to review and send manually in Gmail. Use the dashboard for connector setup and logs.')
         elif command == '/new':
             conversation.clear(); self._chat_conversation(conversation)
             self.say('New conversation. What would you like to talk about or work on?')
@@ -306,13 +308,13 @@ class TelegramBot:
             elif value == 'search':
                 conversation['request'].update(use_search=True, use_browser=True); self._addresses_prompt(conversation)
             else: conversation['stage'] = value; self.say('Send up to five public URLs separated by spaces.' if value=='urls' else 'Paste your research notes with their source URLs.')
-        elif stage == 'action' and value in {'none','draft','send'}:
+        elif stage == 'action' and value in {'none','draft'}:
             conversation['request']['gmail_action'] = value
             # Validate before asking the user to confirm, keeping errors editable.
             request = WorkflowRequest.model_validate(conversation['request'])
             self.service.manager.validate_request(request)
             conversation['stage'] = 'confirm'
-            self.say(f'Goal: {request.goal}\nFrom: {request.sender.name} <{request.sender.email or "not configured"}>\nSearch: {request.use_search}\nBrowser: {request.use_browser}\nAttached files: {len(request.attachments)}\nAfter approval: {request.gmail_action}\nStart this run?', self._wizard_buttons(conversation, [('Start run', 'confirm')]))
+            self.say(f'Goal: {request.goal}\nFrom: {request.sender.name} <{request.sender.email or "not configured"}>\nSearch: {request.use_search}\nBrowser: {request.use_browser}\nAttached files: {len(request.attachments)}\nDraft destination: {request.gmail_action}\nYou review and send Gmail drafts yourself. Start this run?', self._wizard_buttons(conversation, [('Start run', 'confirm')]))
         elif stage == 'confirm' and value == 'confirm':
             job = self.service.start(WorkflowRequest.model_validate(conversation['request']), f'tg:{self.message_key}:start', 'telegram')
             self.say(f'Run queued: {job["run_id"]}. I will notify you when it needs a decision.'); conversation.clear()

@@ -73,7 +73,8 @@ class WorkflowRequest(OutreachRequest):
     use_browser: bool = Field(default=False, strict=True)
     seed_urls: list[URLText] = Field(default_factory=list, max_length=5)
     discover_emails: bool = Field(default=False, strict=True)
-    gmail_action: Literal["none", "draft", "send"] = "none"
+    # Sending is a manual action in Gmail. Keep it out of new request schemas.
+    gmail_action: Literal["none", "draft"] = "none"
 
 
 class MemoryFact(Record):
@@ -155,6 +156,8 @@ class Outcome(Record):
     source: NonEmptyText
     external_id: str | None = None
     thread_id: str | None = None
+    # Identifies the exact account, recipient, content, and action saved to Gmail.
+    message_fingerprint: str | None = None
 
 
 class ReplyRequest(Record):

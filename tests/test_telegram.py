@@ -47,7 +47,7 @@ def test_new_bot_instance_continues_saved_conversation(make_run_manager):
 
 
 @pytest.mark.parametrize('source_mode', ['public', 'file'])
-def test_guided_telegram_browser_gmail_flow_and_dashboard_shared_choices(tmp_path, source_mode):
+def test_guided_request_saves_gmail_drafts_and_notifies_owner(tmp_path, source_mode):
     from app.demo import build_demo_manager
     settings=Settings(data_dir=tmp_path,checkpoint_backend='memory',demo=True,telegram_owner_id=123)
     manager=build_demo_manager(settings=settings);service=AgentService(manager);client=FakeTelegram();bot=TelegramBot(service,client)
@@ -77,22 +77,24 @@ def test_guided_telegram_browser_gmail_flow_and_dashboard_shared_choices(tmp_pat
             await dispatch('Example University | professor@example.com')
         else:
             await dispatch(button=button('Public URLs'));await dispatch('https://example.com/lab');await dispatch('-')
-        await dispatch(button=button('Gmail draft'));await dispatch(button=button('Start run'))
+        await dispatch(button=button('Gmail draft'))
+        start = button('Start run')
+        assert manager.gmail.calls == []
+        await dispatch(button=start)
         runs=service.list_runs()['items'];assert len(runs)==1
         run_id=runs[0]['run_id'];assert service.manager.repository.run(run_id)['status']=='queued'
         if source_mode == 'file': await service.execute_one()  # Reading is queued before outreach.
-        await service.execute_one(); assert service.state(run_id).awaiting_approval
+        await service.execute_one(); assert not service.state(run_id).awaiting_approval
         if source_mode == 'file':
             assert service.state(run_id).state.documents[0].filename == 'notes.txt'
         await dispatch('/review '+run_id)
-        approve=button('Approve draft');await dispatch(button=approve)
-        assert service.details(run_id)['choices']['p1']['action']=='approve'
-        # Dashboard submits the choice made in Telegram; no second research.
-        service.submit_choices(run_id,'dashboard:submit');await service.execute_one()
+        assert service.details(run_id)['state']['outcomes']['p1']['status']=='drafted'
         assert service.state(run_id).state.outcomes['p1'].status=='drafted'
-        await dispatch(button=approve)
+        await dispatch(button=start)  # An old start button cannot repeat drafting.
         assert len([c for c in manager.gmail.calls if c[0]=='draft'])==1
         assert manager.repository.run(run_id)['model_calls']==6
+        assert not any(c[0]=='send' for c in manager.gmail.calls)
+        assert any('click Send yourself' in p.get('text','') for _,p in client.calls)
     try: asyncio.run(check())
     finally: manager.repository.engine.dispose()
 

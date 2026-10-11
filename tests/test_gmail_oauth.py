@@ -42,6 +42,22 @@ def test_tokens_are_encrypted_and_absent_from_public_status(make_run_manager):
     asyncio.run(check())
 
 
+def test_connected_and_bound_clients_reject_send_before_any_http(make_run_manager):
+    setup = make_run_manager()
+    requests = []
+    async def check():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+                lambda request: requests.append(request) or httpx.Response(200, json={}))) as http:
+            account = account_for(setup, http)
+            seed(account, expired=True)
+            connected = ConnectedGmail(account)
+            for client in [connected, connected.for_run('user@example.com', 'account-one')]:
+                with pytest.raises(ToolError, match='Send manually'):
+                    await client.send(None, None, None)
+    asyncio.run(check())
+    assert requests == []
+
+
 def test_refresh_updates_credentials_once_before_request(make_run_manager,monkeypatch):
     setup=make_run_manager(); calls=[]
     def refresh(self, request):
@@ -120,7 +136,7 @@ def test_account_change_prevents_gmail_write(make_run_manager,records):
             account=account_for(setup,http);seed(account)
             bound=ConnectedGmail(account).for_run('user@example.com','old-account')
             with pytest.raises(ToolError,match='account changed'):
-                await bound.send(Sender(email='user@example.com'),Recipient(email='contact@example.com'),records[EmailDraft])
+                await bound.create_draft(Sender(email='user@example.com'),Recipient(email='contact@example.com'),records[EmailDraft])
     asyncio.run(check());assert requests==[]
 
 

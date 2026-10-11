@@ -1,5 +1,18 @@
 # Local validation
 
+## Supabase state and requested drafts — October 10, 2026
+
+- **443 tests passed** with `RUN_POSTGRES_TESTS=1 RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/python -m pytest -o addopts='' -q --tb=short`. This includes real local Chromium, OCR, and a disposable PostgreSQL 16 cluster. Supabase cloud credentials were not used. A final connector-message wording change also passed the 10 Gmail OAuth tests.
+- Real Postgres checks applied migrations in the private `outreach` schema, saved jobs and LangGraph checkpoints, reopened a paused run, and resumed without repeating model work. Another service's database lock was rejected. Row-level security and absence of Data API role access were verified through SQL. A confirmed fake Gmail draft was reused after restart instead of being created again.
+- Draft behavior checks cover explicit owner start, no Gmail writes before that start, reviewed draft creation without fabricated human approval, contact opt-outs, failed review, unchanged contact timestamps for unsent drafts, duplicates, uncertain results, cancellation, and notification wording. New API send requests, legacy send runs, old sending flags, and connected Gmail send calls are blocked.
+- All four simulated evaluations passed. These verify code and scoring against fixed examples, not live model quality. The evaluation report remains in ignored `.data`.
+- A real Chromium dashboard walkthrough signed in, inspected the SQLite storage card, submitted the fictional request through **Start drafting**, and displayed a completed fake Gmail draft with **Open Gmail Drafts** guidance. The send option is absent. The updated Mermaid diagram was rendered and visually inspected. JavaScript syntax and Git whitespace checks passed.
+- The normal service was paused while idle, shut down gracefully, and restarted with the updated code. Health returned `ok`, Telegram connected, the selected model remained `xai`, and agent sending reported `false`. Storage remained SQLite with SQLite checkpoints; all three saved failed chat jobs remained. The previous queue state was restored. No model inference or real Gmail action was requested during these checks.
+
+**Still to verify with owner accounts:** create the Supabase project and set its connection URL; verify actual hosted connectivity and reconnect Gmail in that store; resolve the existing xAI account restriction and test a requested draft. SQLite files and credentials are preserved, but no local-to-cloud data migration was performed. Docker dependencies were updated; a container build was not run. Manual Gmail sending is performed by the owner and is not automatically reconciled into the app's historical sent counter.
+
+Earlier sections below are historical records of the behavior and checks at those phases.
+
 ## Grok on xAI — October 10, 2026
 
 - **425 tests passed** with `RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/python -m pytest -o addopts='' -q`, including local Chromium/OCR and the existing simulated evaluations. The focused provider, Telegram-conversation, and dashboard suite passed all 102 tests.

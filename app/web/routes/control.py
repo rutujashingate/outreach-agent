@@ -43,6 +43,8 @@ def connections(request):
     model_key = {'groq': 'GROQ_API_KEY', 'openai': 'OPENAI_API_KEY', 'xai': 'XAI_API_KEY'}[settings.model_provider]
     gmail = manager.gmail.status() if manager.gmail and hasattr(manager.gmail, 'status') else {'connected': False}
     return {'gmail': gmail, 'telegram': service(request).store.get('telegram_status', {'health': 'disabled'}),
+            'storage': {'database': 'supabase' if settings.supabase_database_url else manager.repository.engine.dialect.name,
+                        'checkpoints': settings.checkpoint_backend, 'schema': 'outreach' if settings.supabase_database_url else None},
             'browser': {'available': manager.browser is not None}, 'search': {'configured': manager.search is not None},
             'documents': service(request).documents.status(),
             'model': {'provider': settings.model_provider, 'configured': settings.demo or bool(os.getenv(model_key, '').strip())}, 'demo': settings.demo,

@@ -19,8 +19,16 @@ async def open_runtime(settings: Settings | None = None):
     configured = settings or Settings.from_env()
     async with AsyncExitStack() as stack:
         url = configured.database_url or f"sqlite:///{configured.data_dir / 'relationships.sqlite3'}"
-        engine = create_database(url); stack.callback(engine.dispose)
+        engine = create_database(url, private_schema=bool(configured.supabase_database_url))
+        stack.callback(engine.dispose)
+        if engine.dialect.name == 'postgresql':
+            from app.storage.postgres import database_instance_lock
+            stack.enter_context(database_instance_lock(engine))
         checkpointer = await stack.enter_async_context(open_checkpointer(configured))
+        if configured.supabase_database_url:
+            from app.storage.postgres import protect_tables
+            # Include LangGraph tables, which its own setup routine creates.
+            protect_tables(engine)
         repository = Repository(engine)
         if configured.demo:
             from app.demo import build_demo_manager

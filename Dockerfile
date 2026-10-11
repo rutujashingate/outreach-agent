@@ -10,7 +10,7 @@ COPY app ./app
 COPY evals ./evals
 COPY migrations ./migrations
 # Pin the browser package to the version used for the sandbox profile.
-RUN python -m pip install --no-cache-dir . playwright==1.63.0 \
+RUN python -m pip install --no-cache-dir '.[postgres]' playwright==1.63.0 \
     && python -m playwright install --with-deps chromium \
     && apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng \
     && useradd --create-home --uid 10001 outreach \

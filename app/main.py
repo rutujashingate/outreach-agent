@@ -142,7 +142,7 @@ def main():
     args = parser.parse_args()
     settings = Settings.from_env()
     if args.demo or settings.demo:
-        settings = settings.model_copy(update={'demo': True, 'data_dir': settings.data_dir / 'demo', 'database_url': None,
+        settings = settings.model_copy(update={'demo': True, 'data_dir': settings.data_dir / 'demo', 'database_url': None, 'supabase_database_url': None,
             'checkpoint_backend': 'sqlite', 'telegram_token': '', 'telegram_owner_id': 1, 'owner_password': settings.owner_password or 'demo'})
     import os
     uvicorn.run(create_app(settings=settings), host=os.getenv('OUTREACH_HOST', '127.0.0.1'), port=int(os.getenv('OUTREACH_PORT', '8000')),

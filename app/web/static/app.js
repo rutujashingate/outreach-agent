@@ -292,7 +292,7 @@ function renderOverview(data) {
         `${s.paused} paused runs`,
       ),
       stat("Gmail drafts created", s.drafts, "Confirmed Gmail actions"),
-      stat("Emails sent", s.sent, "Confirmed Gmail actions"),
+      stat("Past agent sends", s.sent, "Sending is disabled; manual Gmail sends are not tracked here"),
     ),
     node(
       "div",
@@ -495,7 +495,7 @@ function renderConnections(c) {
       "Gmail",
       gmail.health || "disconnected",
       gmail.email ||
-        "Connect your Google account to read conversations and create approved messages.",
+        "Connect Gmail to save drafts you request. Review and send them yourself in Gmail.",
       gmailActions,
     ),
     node(
@@ -515,6 +515,12 @@ function renderConnections(c) {
         c.browser.available ? "connected" : "unavailable",
         `Browser: ${c.browser.available ? "ready" : "Chromium not available"}. Brave search: ${c.search.configured ? "configured" : "not configured"}.`,
       ),
+    ),
+    card(
+      "D",
+      "Saved state",
+      c.storage?.database === "supabase" ? "Supabase PostgreSQL" : (c.storage?.database || "local"),
+      `Jobs, conversations, drafts and workflow progress are saved. Checkpoints: ${c.storage?.checkpoints || "unknown"}. Email sending is manual in Gmail.`,
     ),
     card(
       "M",
@@ -752,6 +758,10 @@ function renderDetail(data) {
         ),
       ),
     );
+  if (Object.values(state.outcomes).some((outcome) => outcome.status === "drafted"))
+    cards.push(panel("Review in Gmail",
+      node("p", {}, "Your requested drafts are saved. Open the connected Gmail account, review and edit them, then click Send yourself. The agent does not send emails."),
+      node("a", { href: "https://mail.google.com/mail/#drafts", target: "_blank", rel: "noopener noreferrer" }, "Open Gmail Drafts")));
   if (!data.awaiting_approval && Object.keys(state.drafts).length)
     cards.push(
       panel(
@@ -786,7 +796,9 @@ function renderDetail(data) {
               {},
               decision
                 ? `Your decision: ${decision.action}`
-                : "No final decision",
+                : state.outcomes[pid]?.status === "drafted"
+                  ? "Your review and sending happen in Gmail"
+                  : "No final decision",
             ),
           );
         }),
@@ -983,8 +995,6 @@ $("new-run").addEventListener("click", () =>
     form.elements.context.value = c.sender_profile.context || "";
     form.elements.search.checked = c.search.configured;
     form.elements.browser.checked = c.browser.available;
-    form.elements.action.querySelector("[value=send]").disabled =
-      !c.gmail.sending_enabled;
     if (c.demo) {
       form.elements.goal.value =
         "Find professors studying AI observability for PhD outreach.";

@@ -11,9 +11,9 @@ python -m pip install -e '.[dev]'
 python -m app.main --demo
 ```
 
-Open **http://127.0.0.1:8000**. The password is `demo` unless `OUTREACH_OWNER_PASSWORD` is already configured. Choose **New run**, keep the example values, and start. When the draft appears, choose **Approve draft**, then **Submit decisions**. The outcome and overview will show one simulated Gmail draft. No real messages are sent.
+Open **http://127.0.0.1:8000**. The password is `demo` unless `OUTREACH_OWNER_PASSWORD` is already configured. Choose **New run**, keep the example values, and start. The outcome and overview will show one simulated Gmail draft after automated review. Inspect its saved content; no real messages are sent.
 
-Demo data persists under `.data/demo`. Repeating the same approved action can be blocked by duplicate protection; use another isolated `OUTREACH_DATA_DIR` for a completely fresh demonstration. Stop the service with Ctrl+C before starting another instance on the same port.
+Demo data persists under `.data/demo`, even with Supabase configured. Repeating the same draft action can be blocked by duplicate protection; use another isolated `OUTREACH_DATA_DIR` for a completely fresh demonstration. Stop the service with Ctrl+C before starting another instance on the same port.
 
 The demo does not connect to a real Telegram bot. Automated tests run the complete guided conversation through `FakeTelegram`; the authenticated demo endpoint in the [API guide](API_GUIDE.md) also exposes it locally.
 
@@ -35,7 +35,7 @@ If you do not have `.env` yet, copy `.env.example` to `.env`. If you already hav
 | `OUTREACH_SECRET_KEY` | A local encryption key for saved Google credentials; generated below. It is not a Google API key. |
 | `OUTREACH_OCR_LANGUAGES=eng` | Installed Tesseract language codes for reading image text. English is the default; PDF/document text needs no OCR installation. |
 | `OUTREACH_READ_GMAIL=true` | Allows relevant conversation history to inform relationship checks. On-demand **Check replies** is a separate explicit action. |
-| `OUTREACH_ENABLE_SENDING=false` | Keeps sending disabled. Creating drafts still requires your approval. |
+| `OUTREACH_SUPABASE_DATABASE_URL` | Optional database connection string for both records and workflow progress. Leave empty for SQLite; follow [Supabase setup](SUPABASE.md). |
 | `OUTREACH_APP_URL` | The exact browser origin, initially `http://127.0.0.1:8000`. Use this same address for login and the Google callback. |
 
 Do not put secrets in Telegram messages, goals, Git commits, or screenshots. A connection shown as “configured” only means settings are present; the provider verifies them when called.
@@ -100,7 +100,7 @@ This application uses long polling, so it needs no public Telegram webhook. If t
 
 **Talk normally.** You do not need `/new` or a fixed sequence of answers. Try “What can you help me with?”, “Read this website and explain its product,” or upload a file with “Summarize the main findings.” Follow with questions such as “Explain the second point.” The bot keeps the last six completed exchanges in the same conversation across restarts, with bounded source excerpts. It asks for missing information when needed. Without a Brave key it can read supplied URLs/files, but cannot discover new websites through search.
 
-If you ask for an outreach campaign, it prepares a concrete request and shows **Start outreach**. Check the goal, background, sources, and intended Gmail action; press the button or describe a change. This starts the existing research/qualification/writing workflow. It does not approve an email: the exact-message approval remains a separate step. Asking for a file summary or research answer does not automatically start outreach.
+If you explicitly ask to prepare outreach emails, it proposes a request and shows **Start outreach**. Check the goal, background, sources, and draft destination; press the button or describe a change. Requested Gmail drafts are saved after qualification, contact checks, and automated review. The notification tells you to review, edit, and click **Send** yourself in Gmail. Asking for a file summary or research answer does not create emails. The default batch limit is five qualified prospects; a request for ten needs smaller batches or a deliberate limit change. Limits and budgets never rise automatically.
 
 `/guided` retains the original goal → background → research options → addresses → action questions. In that optional flow, `-` reuses your saved background or indicates no known recipients. `/chat` leaves guided questions. Use the dashboard’s Connections page to save your name and accurate background before live outreach.
 
@@ -112,7 +112,7 @@ Each ordinary message is a durable job, so commands remain responsive during mod
 | `/new` | Start a fresh conversation and detach current files; saved runs and old records remain. |
 | `/guided`, `/chat` | Enter optional step-by-step setup, or return to ordinary conversation. |
 | `/runs`, `/status RUN_ID` | Recent runs or current progress. |
-| `/review RUN_ID` | Current draft cards with approve/reject/edit choices. |
+| `/review RUN_ID` | Gmail draft completion guidance, or review choices for app-only drafts and older pending approvals. |
 | `/recipients RUN_ID` | Resolve missing or ambiguous recipient addresses. |
 | `/retry RUN_ID`, `/cancel RUN_ID` | Retry failed work or request a stop at the next safe boundary. |
 | `/files`, `/clearfiles` | Show current file IDs/status, or detach files from the goal conversation. |
@@ -120,7 +120,7 @@ Each ordinary message is a durable job, so commands remain responsive during mod
 | `/replies` | Queue a reply check for tracked Gmail conversations. |
 | `/account`, `/help` | Gmail connection status or command help. |
 
-Choose a decision for every pending prospect and submit the batch. Decisions made in the dashboard are immediately authoritative in Telegram too. Old buttons cannot approve a changed message. If Telegram delivery is uncertain, `/review` or `/status` retrieves current saved information.
+For app-only drafts or an older run already paused for approval, choose a decision for every pending prospect and submit the batch. These choices are shared with the dashboard; old buttons cannot approve a changed message. New Gmail drafts need no additional in-app approval after you request them. Sending always happens manually in Gmail. If Telegram delivery is uncertain, `/review` or `/status` retrieves current saved information.
 
 ## Read files and use them for research
 
@@ -183,20 +183,19 @@ OUTREACH_GOOGLE_CLIENT_ID=your_client_id.apps.googleusercontent.com
 OUTREACH_GOOGLE_CLIENT_SECRET=your_client_secret
 OUTREACH_APP_URL=http://127.0.0.1:8000
 OUTREACH_READ_GMAIL=true
-OUTREACH_ENABLE_SENDING=false
 ```
 
 6. Restart with `python -m app.main` from the project folder. Use the normal service command for your account connection; demo mode uses fake Gmail. Open **http://127.0.0.1:8000**, enter your `OUTREACH_OWNER_PASSWORD`, open **Connections**, and select **Connect Google**. Sign in to the account you added as a test user and grant the requested permissions. Connections should then show that Gmail address. Telegram's `/account` command shows the same account.
 
 For `redirect_uri_mismatch`, compare the full callback above with the registered URI: scheme, hostname, port, path, and trailing slash must match. A test-user access error usually means the selected Gmail account is missing from **Audience → Test users**, or the wrong Cloud project/client was configured. Both client values and the local encryption key must be present before **Connect Google** can work.
 
-The app requests `gmail.readonly` to read history and `gmail.compose` to manage drafts and send approved messages. Compose permission includes sending, but this application still enforces the server sending switch, requested action, and exact-message approval. [Gmail permission definitions](https://developers.google.com/workspace/gmail/api/auth/scopes).
+The app requests `gmail.readonly` to read history and `gmail.compose` to manage drafts. Google's compose scope includes sending permission; the application blocks sending in its request validation, workflow, and connected Gmail adapter. There is no separate draft-only Gmail scope. Review and send manually in Gmail. The legacy `OUTREACH_ENABLE_SENDING` setting is ignored and cannot enable sending. [Gmail permission definitions](https://developers.google.com/workspace/gmail/api/auth/scopes).
 
 Access tokens renew automatically using the encrypted refresh token. Google can revoke or expire authorization; external apps in Testing generally receive seven-day refresh tokens for these scopes. Reconnect when shown in Connections. [Google token expiration rules](https://developers.google.com/identity/protocols/oauth2#expiration).
 
 There is no need to manually populate `GMAIL_ACCESS_TOKEN` for this service. Existing local values are left intact but are not used by the connected-account runtime.
 
-Verify your address on Connections. First approve a draft addressed to yourself and inspect it in Gmail. For a live send test, explicitly set `OUTREACH_ENABLE_SENDING=true`, restart, create a **new send-mode run addressed to yourself**, and approve its exact message. An earlier draft-mode approval never authorizes a send. Switching Google accounts blocks pending actions bound to the earlier account; reconnecting the same account without disconnecting preserves its identity.
+Verify your address on Connections. Ask for one draft addressed to yourself, start the proposal, and inspect the resulting draft in Gmail. Review and edit it, then click Send there only if you want to send the test. The agent never sends it. Switching Google accounts blocks pending draft actions bound to the earlier account; reconnecting the same account without disconnecting preserves its identity. Old send-mode runs cannot resume; create a new draft-only request.
 
 **Check replies** reads tracked conversations on demand, processing at most five new inbound messages and scanning at most 20 tracked actions per request. A saved position rotates through larger histories. It saves reply classification and supported memory; it does not send follow-ups. Only plain-text email bodies are extracted in this version.
 
@@ -206,16 +205,17 @@ Leave these defaults for local operation:
 
 ```dotenv
 OUTREACH_DATA_DIR=.data
+OUTREACH_SUPABASE_DATABASE_URL=
 OUTREACH_DATABASE_URL=
 OUTREACH_CHECKPOINT_BACKEND=sqlite
 OUTREACH_CHECKPOINT_POSTGRES_URL=
 ```
 
-Both databases use **SQLite**. `relationships.sqlite3` contains runs, jobs, contacts, events, decisions, and encrypted credentials. `checkpoints.sqlite3` contains LangGraph progress. PostgreSQL is an optional retained adapter, not required or used alongside these defaults. The packaged one-worker service is validated with SQLite.
+With an empty Supabase URL, both files use **SQLite**. `relationships.sqlite3` contains runs, jobs, contacts, events, decisions, and encrypted credentials. `checkpoints.sqlite3` contains LangGraph progress. For hosted storage, follow [Supabase setup](SUPABASE.md): one URL selects the same Postgres database for both kinds of records. Existing SQLite data is preserved but not automatically copied. Local Postgres restart, checkpoint, and duplicate-draft checks are included in the tests; connecting your actual Supabase project is a separate setup step.
 
 Migrations apply automatically on startup. Uploaded originals live in `uploads/`, and extracted text/metadata live in the application database. Back up the entire data directory with the service stopped and retain the encryption key separately. Do not delete SQLite journal/WAL files from a running service. Use the same directory after restart; approvals and queued work remain available. Interrupted executions require **Retry**. An uncertain Gmail write remains blocked: inspect Gmail and the recorded outcome before attempting any manual recovery.
 
-**Pause queue** prevents new jobs from starting; it does not interrupt the active job. **Cancel run** stops further work at a safe boundary. If Gmail is already creating/sending a message, the application records that result before stopping.
+**Pause queue** prevents new jobs from starting; it does not interrupt the active job. **Cancel run** stops further work at a safe boundary. If Gmail is already creating a draft, the application records that result before stopping.
 
 Defaults: five pages per run, 20 seconds per page, one linked-page level, 15,000 extracted characters per page, two searches, at most ten discovered/five qualified prospects, and one shared revision. Model calls and browser attempts stay counted across retries.
 
@@ -234,6 +234,8 @@ Actual billing is managed with the selected provider. For xAI, API credits and b
 ```bash
 python -m pytest
 RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 python -m pytest
+# Optional: requires local initdb/pg_ctl and the postgres package extra.
+RUN_POSTGRES_TESTS=1 python -m pytest tests/test_supabase_storage.py
 python -m evals.run --output .data/evaluations.json
 ```
 
@@ -251,7 +253,7 @@ docker compose logs -f outreach
 docker compose down
 ```
 
-Compose reads `.env`, binds port 8000 to localhost, and saves SQLite data in the `outreach_data` named volume. `down` retains that volume; do not use `down -v` when keeping data. Container storage is separate from your host `.data` unless you deliberately migrate it with both services stopped.
+Compose reads `.env`, binds port 8000 to localhost, and keeps uploaded files and default SQLite data in the `outreach_data` named volume. The image includes Postgres dependencies for Supabase too. `down` retains that volume; do not use `down -v` when keeping data. Container storage is separate from your host `.data` unless you deliberately migrate it with both services stopped.
 
 The image runs as a non-root user with sandboxed Chromium. Compose supplies the upstream Playwright seccomp profile, an init process, and 1 GB shared memory. The host must support unprivileged user namespaces; do not disable Chromium’s sandbox to work around a hosting restriction. [Playwright container requirements](https://playwright.dev/python/docs/docker).
 

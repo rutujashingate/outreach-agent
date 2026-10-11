@@ -33,7 +33,8 @@ def test_api_queues_runs_and_resumes_same_run(make_run_manager, workflow_data):
 
 
 @pytest.mark.parametrize('changes',[{'goal':' '},{'unknown':True},{'use_search':'true'},
-    {'recipients':{'p1':{'email':'invalid'}}},{'gmail_action':'automatic'},{'seed_urls':['file:///tmp/test']}])
+    {'recipients':{'p1':{'email':'invalid'}}},{'gmail_action':'automatic'}, {'gmail_action':'send'},
+    {'seed_urls':['file:///tmp/test']}])
 def test_bad_requests_never_queue_or_call_models(make_run_manager,workflow_data,changes):
     setup=make_run_manager()
     with client_for(setup) as client:

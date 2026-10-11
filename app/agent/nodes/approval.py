@@ -10,6 +10,11 @@ from app.agent.policy import message_fingerprint
 
 
 async def prepare_approval(state: WorkflowState, runtime: Runtime[WorkflowContext]) -> dict:
+    if state.gmail_action == 'draft':
+        # The owner already requested draft creation by starting this run.
+        # Review and the final Send action happen in Gmail; do not invent a
+        # human approval record just to pass through the old approval node.
+        return {'approval_requests': [], 'current_step': 'reviewed'}
     requests = []
     for prospect in allowed_prospects(state):
         review = state.reviews.get(prospect.id)

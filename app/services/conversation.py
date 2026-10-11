@@ -80,7 +80,8 @@ class ConversationService:
                     'sender_profile': self.store.get('sender_profile', {'name': 'User', 'context': ''}),
                     'capabilities': {'search': self.manager.search is not None, 'browser': self.manager.browser is not None,
                                      'gmail_connected': bool(account.get('connected')),
-                                     'sending_enabled': self.manager.settings.sending_enabled},
+                                     'sending_enabled': False,
+                                     'max_drafts_per_run': self.manager.settings.limits.max_qualified},
                 }
                 limits = self.manager.settings.limits
                 limits = limits.model_copy(update={'max_model_calls': min(limits.max_model_calls, limits.max_chat_model_calls),
@@ -274,8 +275,9 @@ class ConversationService:
                     '\nStarting URLs: ' + (', '.join(request.seed_urls) or 'none') +
                     '\nAttached files: ' + str(len(request.attachments)) +
                     '\nKnown recipients: ' + (', '.join(f'{name}: {item.email}' for name, item in request.recipients.items()) or 'resolve during research') +
-                    '\nAfter message approval: ' + {'none': 'save in app', 'draft': 'create Gmail draft', 'send': 'send through Gmail'}[request.gmail_action] +
-                    '\n\nPress Start outreach, or tell me what to change. You will review the exact email separately.')
+                    '\nDraft destination: ' + {'none': 'save in app', 'draft': 'Gmail Drafts; you review and send manually'}[request.gmail_action] +
+                    f'\nBatch limit: up to {self.manager.settings.limits.max_qualified} qualified prospects; fewer drafts if evidence, contact checks, or budget prevent completion.' +
+                    '\n\nPress Start outreach to request these drafts, or tell me what to change. No email will be sent by the agent.')
             except (ValueError, RunConflict, ConfigurationError) as error:
                 result['text'] = str(error) if isinstance(error, (RunConflict, ConfigurationError)) else 'Please clarify the outreach goal and which sources I should use.'
         else:

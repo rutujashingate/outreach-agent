@@ -38,6 +38,18 @@ async def open_checkpointer(settings: Settings):
             from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
         except ImportError as error:
             raise ValueError("Install the project's postgres extra to use PostgreSQL checkpoints.") from error
+        if settings.supabase_database_url:
+            from psycopg import AsyncConnection
+            from psycopg.rows import dict_row
+            # Session mode keeps this schema selection and LangGraph's prepared
+            # statements on the same connection. Transaction pooling cannot.
+            async with await AsyncConnection.connect(settings.checkpoint_postgres_url,
+                    autocommit=True, prepare_threshold=0, row_factory=dict_row) as connection:
+                await connection.execute('SET SESSION search_path TO outreach')
+                saver = AsyncPostgresSaver(connection, serde=checkpoint_serializer())
+                await saver.setup()
+                yield saver
+            return
         async with AsyncPostgresSaver.from_conn_string(settings.checkpoint_postgres_url) as saver:
             saver.serde = checkpoint_serializer()
             await saver.setup()

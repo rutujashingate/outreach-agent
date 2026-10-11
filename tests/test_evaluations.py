@@ -49,14 +49,10 @@ def test_evaluation_detects_revision_limit_regression(make_run_manager, workflow
     assert score_run(state, reference, max_revisions=1)["workflow_rules"] == 0
 
 
-def test_evaluation_checks_action_and_account_bound_approval(make_run_manager, workflow_data):
-    from app.domain.workflow import ApprovalSubmission
+def test_evaluation_checks_saved_draft_action_account_and_manual_send_policy(make_run_manager, workflow_data):
     setup = make_run_manager()
     async def exercise():
-        response = await setup.manager.start(workflow_data.request.model_copy(update={'gmail_action':'draft'}))
-        item = response.state.approval_requests[0]
-        return await setup.manager.resume(response.state.run_id, ApprovalSubmission(decisions=[{
-            'prospect_id':'p1','version':item.version,'fingerprint':item.fingerprint,'action':'approve'}]))
+        return await setup.manager.start(workflow_data.request.model_copy(update={'gmail_action':'draft'}))
     state = asyncio.run(exercise()).state
     reference = {'goal_type':'sales','target_names':['Example AI'],'qualified_names':['Example AI'],'sources':['https://example.com/careers']}
     assert state.outcomes['p1'].status == 'drafted'
@@ -64,4 +60,8 @@ def test_evaluation_checks_action_and_account_bound_approval(make_run_manager, w
     state.gmail_action = 'send'
     assert score_run(state, reference)['workflow_rules'] < 1
     state.gmail_action, state.gmail_account_id = 'draft', 'another-account'
+    assert score_run(state, reference)['workflow_rules'] < 1
+    state.reviews.clear()
+    assert score_run(state, reference)['workflow_rules'] < 1
+    state.outcomes['p1'].status = 'sent'
     assert score_run(state, reference)['workflow_rules'] < 1

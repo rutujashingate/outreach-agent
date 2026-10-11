@@ -3,9 +3,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Contributions welcome](https://img.shields.io/badge/Contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-A conversational Telegram assistant for questions, file reading, public-web research, and outreach. Talk normally and ask follow-up questions. When you request outreach, it prepares sourced prospects and reviewed emails. You approve the exact message before Gmail creates a draft or sends it.
+A conversational Telegram assistant for questions, file reading, public-web research, and outreach. Emails are prepared only when you ask. The agent saves requested, reviewed drafts in Gmail and notifies you; you review, edit, and click **Send** yourself.
 
-**Python 3.12+ · LangGraph · FastAPI · Grok (xAI)/Groq/OpenAI · SQLite · Playwright · Telegram · Gmail**
+**Python 3.12+ · LangGraph · FastAPI · Grok (xAI)/Groq/OpenAI · SQLite or Supabase Postgres · Playwright · Telegram · Gmail**
 
 ## What it does
 
@@ -13,16 +13,16 @@ A conversational Telegram assistant for questions, file reading, public-web rese
 - Reads uploaded PDFs, scanned pages, images, Word/OpenDocument files, and text. Uses relevant content to guide research, with filename/page references.
 - Researches public websites and optional Brave results; retains sources and published email evidence.
 - Qualifies prospects, checks relationship history and contact rules, and writes personalized drafts.
-- Shares review, edit, approve, reject, retry, and cancel controls between Telegram and the dashboard.
+- Shows drafts, evidence, progress, retries, and cancellation in Telegram and the dashboard. App-only drafts retain review controls.
 - Saves jobs, conversations, approvals, and workflow progress across restarts.
-- Connects one Gmail account with encrypted, renewable credentials. Drafts are the default; sends require explicit enablement and approval.
+- Connects one Gmail account with encrypted, renewable credentials. The agent cannot send emails.
 - Tracks events, reported tokens, estimated budgets, confirmed Gmail actions, and on-demand reply checks.
 
 ## How it works
 
-![Telegram conversation reads evidence and answers, or starts the shared outreach workflow with human approval, Gmail actions, and SQLite persistence](docs/assets/workflow.svg)
+![Telegram questions use reading tools; explicit email requests produce Gmail drafts for the owner to review and send, with persistent state](docs/assets/workflow.svg)
 
-One saved queue serves conversation and outreach. The conversation graph can answer directly, read evidence, or propose an outreach run. Approval resumes the same outreach run. Uncertain Gmail writes remain blocked for inspection.
+One saved queue serves conversation and outreach. A draft request becomes a concrete proposal with a **Start outreach** button. Ordinary searches and file questions do not create emails. Uncertain Gmail writes remain blocked for inspection.
 
 ## Try it locally
 
@@ -33,7 +33,7 @@ python -m pip install -e '.[dev]'
 python -m app.main --demo
 ```
 
-Open **http://127.0.0.1:8000** and sign in with **`demo`** (or your configured owner password). Select **New run**, keep the fictional example, then approve its draft and submit your decision. All external services are simulated; no keys or Chromium installation are needed. Demo progress is saved separately in `.data/demo`.
+Open **http://127.0.0.1:8000** and sign in with **`demo`** (or your configured owner password). Select **New run**, keep the fictional example, and start it. Inspect the saved message and simulated Gmail draft outcome. All external services are simulated; no keys or Chromium installation are needed. Demo progress is saved separately in `.data/demo`.
 
 Send a file in Telegram with a caption such as “Summarize this,” or attach it in the dashboard's **New run** form. Choose **My background** for a resume/profile or **Research evidence** for material to investigate. Image and scanned-PDF text needs [local Tesseract OCR](docs/SETUP.md#read-files-and-use-them-for-research); no extra model key is needed.
 
@@ -46,7 +46,7 @@ python -m pytest
 python -m evals.run --output .data/evaluations.json
 ```
 
-Tests and the default evaluations use local substitutes. The [validation record](docs/VALIDATION.md) lists completed checks and live account checks. Normal storage uses two SQLite files—application records and workflow checkpoints—not two database servers.
+Tests and the default evaluations use local substitutes. The [validation record](docs/VALIDATION.md) lists completed and pending checks. Storage defaults to two local SQLite files; [Supabase setup](docs/SUPABASE.md) puts application records and workflow progress in one hosted Postgres database.
 
 ## Documentation and contributions
 

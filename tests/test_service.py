@@ -111,14 +111,12 @@ def test_statistics_count_confirmed_actions_not_approvals(make_run_manager, work
     setup = make_run_manager(); service = AgentService(setup.manager)
     request = workflow_data.request.model_copy(update={'gmail_action':'draft'})
     job = service.start(request, 'start')
-    asyncio.run(service.execute_one())
     before = service.overview()['stats']
-    assert before['drafts'] == 0 and before['pending_approvals'] == 1
-    service.stage_decision(job['run_id'], decision(service.state(job['run_id'])))
-    service.submit_choices(job['run_id'], 'submit'); asyncio.run(service.execute_one())
+    assert before['drafts'] == 0 and before['pending_approvals'] == 0
+    asyncio.run(service.execute_one())
     after = service.overview()['stats']
     assert after['drafts'] == 1 and after['sent'] == 0 and after['model_calls'] == 6
-    assert service.overview()['job_counts'] == {'completed': 2}
+    assert service.overview()['job_counts'] == {'completed': 1}
     assert len(service.details(job['run_id'])['events']) <= 50
 
 

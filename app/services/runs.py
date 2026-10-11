@@ -127,8 +127,8 @@ class RunManager:
             raise ConfigurationError("Search was requested; configure BRAVE_SEARCH_API_KEY or inject a search tool.")
         if request.gmail_action != "none" and (self.gmail is None or request.sender.email is None):
             raise ConfigurationError("Gmail actions require Gmail configuration and a sender email.")
-        if request.gmail_action == "send" and not self.settings.sending_enabled:
-            raise RunConflict("Sending is disabled. It requires explicit enablement and human approval.")
+        if request.gmail_action == "send":
+            raise RunConflict("The agent only creates drafts. Review and send the email yourself in Gmail.")
         if request.use_browser and self.browser is None:
             raise ConfigurationError("Browser research is unavailable; install Chromium and enable the browser connector.")
 
@@ -175,6 +175,8 @@ class RunManager:
             # approvals rather than using a snapshot read before the lock.
             previous = self.repository.run(run_id)
             state = WorkflowState.model_validate(previous["state"])
+            if state.gmail_action == 'send':
+                raise RunConflict('This saved run requested sending. Start a new draft-only run; send manually from Gmail.')
             if selections is not None:
                 from app.agent.nodes.recipients import validate_selections
                 if previous["status"] != "paused" or state.current_step != "awaiting_recipients":

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
 
@@ -11,7 +11,7 @@ from alembic.config import Config
 import migrations
 
 
-def create_database(url: str = "sqlite:///:memory:") -> Engine:
+def create_database(url: str = "sqlite:///:memory:", *, private_schema: bool = False) -> Engine:
     options: dict = {"pool_pre_ping": True}
     if url.startswith("sqlite"):
         options["connect_args"] = {"check_same_thread": False, "timeout": 30}
@@ -19,12 +19,27 @@ def create_database(url: str = "sqlite:///:memory:") -> Engine:
             options["poolclass"] = StaticPool
         elif ":///" in url:
             Path(url.split(":///", 1)[1]).parent.mkdir(parents=True, exist_ok=True)
+    if url.startswith('postgresql'):
+        options.update(pool_size=3, max_overflow=0, pool_timeout=10)
     engine = create_engine(url, **options)
+    if private_schema:
+        if engine.dialect.name != 'postgresql':
+            engine.dispose()
+            raise ValueError('Private Supabase storage requires PostgreSQL.')
+        from app.storage.postgres import prepare_connection
+        event.listen(engine, 'connect', prepare_connection, insert=True)
     # This establishes the initial schema. Later table changes need explicit
     # migrations rather than silently relying on create_all to alter a table.
     config = Config()
     config.set_main_option("script_location", str(Path(migrations.__file__).parent))
-    with engine.begin() as connection:
-        config.attributes["connection"] = connection
-        command.upgrade(config, "head")
+    try:
+        with engine.begin() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "head")
+        if private_schema:
+            from app.storage.postgres import protect_tables
+            protect_tables(engine)
+    except Exception:
+        engine.dispose()
+        raise
     return engine

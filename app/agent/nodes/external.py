@@ -1,11 +1,11 @@
-"""Execute approved Gmail actions once, and preserve uncertain results."""
+"""Save requested Gmail drafts once. Sending is always manual in Gmail."""
 
 import asyncio
 
 from langgraph.runtime import Runtime
 
 from app.storage.repository import stable_id
-from app.domain.workflow import Outcome, WorkflowState, utc_now
+from app.domain.workflow import Outcome, WorkflowState
 from app.storage.events import trace
 from app.agent.context import WorkflowContext
 from app.agent.policy import check_contact, message_fingerprint
@@ -21,14 +21,18 @@ async def external_node(state: WorkflowState, runtime: Runtime[WorkflowContext])
             continue
         decision, review = state.human_decisions.get(prospect_id), state.reviews.get(prospect_id)
         recipient, draft = state.recipients.get(prospect_id), state.drafts.get(prospect_id)
-        if recipient is None or draft is None or review is None or not review.approved or decision is None:
+        if state.gmail_action == 'send':
+            outcomes[prospect_id] = Outcome(prospect_id=prospect_id, status='blocked',
+                reason='Sending is manual in Gmail. This agent only creates drafts.', source=f'run:{state.run_id}:policy')
+            continue
+        if recipient is None or draft is None or review is None or not review.approved:
             continue
         fingerprint = message_fingerprint(state.sender, recipient, draft, state.gmail_action, state.gmail_account_id)
-        if decision.action != "approve" or decision.version != state.draft_versions.get(prospect_id) or decision.fingerprint != fingerprint:
+        if state.gmail_action == 'none' and (decision is None or decision.action != "approve" or decision.version != state.draft_versions.get(prospect_id) or decision.fingerprint != fingerprint):
             outcomes[prospect_id] = Outcome(prospect_id=prospect_id, status="blocked",
                 reason="There is no approval for the current recipient and message.", source=f"run:{state.run_id}:approval")
             continue
-        source = f"run:{state.run_id}:approval"
+        source = f"run:{state.run_id}:" + ('review' if state.gmail_action == 'draft' else 'approval')
         if state.gmail_action == "none":
             outcomes[prospect_id] = Outcome(prospect_id=prospect_id, status="approved", source=source)
             continue
@@ -49,10 +53,6 @@ async def external_node(state: WorkflowState, runtime: Runtime[WorkflowContext])
         if not policy.allowed or context.gmail is None or state.sender.email is None:
             outcomes[prospect_id] = Outcome(prospect_id=prospect_id, status="blocked",
                 reason=" ".join(policy.reasons) if not policy.allowed else "Gmail and a sender address are required.", source=source)
-            continue
-        if state.gmail_action == "send" and not context.sending_enabled:
-            outcomes[prospect_id] = Outcome(prospect_id=prospect_id, status="blocked",
-                reason="Email sending has not been explicitly enabled.", source=source)
             continue
         if not context.repository.claim_contact_action(recipient.email, key):
             outcomes[prospect_id] = Outcome(prospect_id=prospect_id, status="blocked",
@@ -75,15 +75,13 @@ async def external_node(state: WorkflowState, runtime: Runtime[WorkflowContext])
               prospect_id=prospect_id, action_key=key)
         try:
             async with asyncio.timeout(context.limits.tool_timeout):
-                result = (await context.gmail.create_draft(state.sender, recipient, draft)
-                          if state.gmail_action == "draft" else await context.gmail.send(state.sender, recipient, draft))
+                result = await context.gmail.create_draft(state.sender, recipient, draft)
             message = result.get("message", result)
             outcome = Outcome(prospect_id=prospect_id,
-                status="drafted" if state.gmail_action == "draft" else "sent",
-                source=f"gmail:{result['id']}", external_id=result["id"], thread_id=message.get("threadId"))
+                status="drafted",
+                source=f"gmail:{result['id']}", external_id=result["id"], thread_id=message.get("threadId"),
+                message_fingerprint=fingerprint)
             context.repository.finish_action(key, "done", {"run_id": state.run_id, "outcome": outcome.model_dump()})
-            if state.gmail_action == "send":
-                context.repository.update_contact(recipient.email, last_contact_at=utc_now().isoformat())
             context.repository.release_contact_action(recipient.email, key)
             outcomes[prospect_id] = outcome
             trace(context.repository, state.run_id, "external_action_end", action=state.gmail_action,
