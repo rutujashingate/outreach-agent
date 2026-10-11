@@ -84,7 +84,7 @@ class TaskControls:
             return {'run_id': existing['run_id'], 'job': existing, 'message': 'Continuation is already queued.'}
         run_id, row = self.select(session_id, run_id)
         goal = row['state']['goal']
-        prefix = f'Task: {goal}\nRun: {run_id}\n'
+        prefix = f'Your request: {goal}\n\n'
         if row['status'] in {'queued', 'running'}:
             status = 'finishing its current call before stopping' if self.store.get('stop:' + run_id, {}).get('requested') else row['status']
             return {'run_id': run_id, 'message': prefix + f'This task is already {status}. No duplicate was started.'}
@@ -101,14 +101,15 @@ class TaskControls:
                 self.service.manager.repository.save_run(WorkflowState.model_validate(snapshot.values), 'paused')
             self.store.delete('stop:' + run_id)
             response = self.service.state(run_id)
-            command = '/recipients' if response.awaiting_recipients else '/review'
-            return {'run_id': run_id, 'message': prefix + f'I still need your decision. Use {command} {run_id} or open this run in the dashboard.'}
+            needs = 'recipients' if response.awaiting_recipients else 'review'
+            message = 'Please choose the email addresses before I continue.' if needs == 'recipients' else 'Please review the drafts before I continue.'
+            return {'run_id': run_id, 'needs': needs, 'message': prefix + message}
         next_steps = list(snapshot.next) or ['save the completed result' if snapshot.values else 'start the saved request']
         # Keep the same run ID, counters, sources, account binding, and action
         # ledger. Only the owner's resumable-stop flag is cleared by retry().
         job = self.service.retry(run_id, key)
         trace(self.service.manager.repository, run_id, 'continue_requested', next_steps=next_steps)
-        message = prefix + 'Continuing from: ' + ', '.join(next_steps) + '.'
+        message = prefix + "I'll pick up where we left off."
         if self.store.get('queue', {}).get('paused'):
             message += ' The job is saved; resume the queue in the dashboard to execute it.'
         return {'run_id': run_id, 'job': job, 'message': message}

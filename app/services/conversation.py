@@ -92,6 +92,7 @@ class ConversationService:
                     'attached_files': [{'document_id': f['id'], 'filename': f['filename'], 'status': f['status'],
                                         'purpose': reference.purpose} for f, reference in zip(files, state.attachments)],
                     'sender_profile': values.get('sender_profile', {'name': 'User', 'context': ''}),
+                    'connected_email': account.get('email') if account.get('connected') else None,
                     'capabilities': {'search': self.manager.search is not None, 'browser': self.manager.browser is not None,
                                      'knowledge': self.manager.settings.semantic_search_enabled,
                                      'research': self.manager.settings.model_provider == 'xai' and self.manager.settings.xai_task_routing,
@@ -131,7 +132,8 @@ class ConversationService:
             await asyncio.to_thread(self._remember, run_id, payload, cached)
             entries = []
             if cached.get('proposal'):
-                entries.append(('Start outreach', {'chat_proposal': run_id, 'conversation': payload['session_id']}))
+                from app.services.presentation import draft_button
+                entries.append((draft_button(WorkflowRequest.model_validate(cached['proposal'])), {'chat_proposal': run_id, 'conversation': payload['session_id']}))
             if cached.get('review_run_id'):
                 entries.append(('Review current drafts', {'review_run': cached['review_run_id']}))
             await asyncio.to_thread(queue_message, self.store, self.manager.settings.telegram_owner_id, 'chat:' + run_id, cached['text'], entries)
@@ -346,7 +348,10 @@ class ConversationService:
                 # model can carry user-supplied background into this request.
                 sender = profile.model_copy(update={'context': request.sender.context or profile.context})
                 attachments = self.service.state(context.run_id).state.attachments
-                request = request.model_copy(update={'sender': sender, 'attachments': attachments, 'discover_emails': True})
+                direct = request.draft_mode == 'direct'
+                request = request.model_copy(update={'sender': sender, 'attachments': attachments,
+                    'discover_emails': not direct,
+                    **({'use_search': False, 'use_browser': False, 'seed_urls': []} if direct else {})})
                 account = self.manager.gmail.status() if self.manager.gmail and hasattr(self.manager.gmail, 'status') else {}
                 if account.get('connected'):
                     request = request.model_copy(update={'sender': sender.model_copy(update={'email': account['email']})})
@@ -370,16 +375,8 @@ class ConversationService:
                 material = '\n\n'.join(json.dumps(item, ensure_ascii=False) for item in research_evidence)
                 request = request.model_copy(update={'research_material': material[:100000]})
                 result['proposal'] = request.model_dump(mode='json')
-                result['text'] = ('Ready to start this outreach request:\n' + request.goal +
-                    '\n\nYour background: ' + (request.sender.context or 'Not supplied') +
-                    '\nWeb search: ' + ('on' if request.use_search else 'off') +
-                    '\nPublic browser: ' + ('on' if request.use_browser else 'off') +
-                    '\nStarting URLs: ' + (', '.join(request.seed_urls) or 'none') +
-                    '\nAttached files: ' + str(len(request.attachments)) +
-                    '\nKnown recipients: ' + (', '.join(f'{name}: {item.email}' for name, item in request.recipients.items()) or 'resolve during research') +
-                    '\nDraft destination: ' + {'none': 'save in app', 'draft': 'Gmail Drafts; you review and send manually'}[request.gmail_action] +
-                    f'\nBatch limit: up to {self.manager.settings.limits.max_qualified} qualified prospects; fewer drafts if evidence, contact checks, or budget prevent completion.' +
-                    '\n\nPress Start outreach to request these drafts, or tell me what to change. No email will be sent by the agent.')
+                from app.services.presentation import proposal_summary
+                result['text'] = proposal_summary(request, self.manager.settings.limits.max_qualified)
             except (ValueError, RunConflict, ConfigurationError) as error:
                 result['text'] = str(error) if isinstance(error, (RunConflict, ConfigurationError)) else 'Please clarify the outreach goal and which sources I should use.'
         else:
@@ -387,7 +384,12 @@ class ConversationService:
                 if item.get('review_run_id'):
                     result['review_run_id'] = item['review_run_id']
             if sources:
-                result['text'] += '\n\nSources:\n' + '\n'.join(f'{known_sources[ref]} — {ref}' for ref in sources)
+                # Website links are useful to the reader. Internal document
+                # IDs are not: show the saved filename/page label instead.
+                from app.services.presentation import source_summary
+                result['text'] += '\n\nSources:\n' + '\n'.join(
+                    source_summary(ref, known_sources[ref])
+                    for ref in sources)
             warnings = list(dict.fromkeys(warning for item in observations for warning in item.get('warnings', [])))
             if warnings:
                 result['text'] += '\n\nReading limits: ' + ' '.join(warnings)

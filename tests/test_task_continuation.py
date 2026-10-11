@@ -78,7 +78,7 @@ def test_sqlite_restart_then_plain_continue_keeps_sources_task_and_budget(tmp_pa
                 await message(bot, 2, 'continue')
                 assert len(service.store.jobs()) == 2
                 assert {j['run_id'] for j in service.store.jobs()} == {job['run_id']}
-                assert any('Continuing from: decide' in text for text in messages(service))
+                assert any("I'll pick up where we left off." in text for text in messages(service))
                 await service.execute_one()
                 record = manager.repository.run(job['run_id'])
                 assert record['status'] == 'completed' and record['model_calls'] == 3
@@ -166,7 +166,8 @@ def test_continue_never_submits_pending_approval(make_run_manager, workflow_data
     async def exercise():
         await service.execute_one()
         result = await service.tasks.continue_task('s', 'continue')
-        assert '/review ' + job['run_id'] in result['message'] and 'job' not in result
+        assert result['needs'] == 'review' and 'job' not in result
+        assert job['run_id'] not in result['message']
         assert service.state(job['run_id']).awaiting_approval
         assert len(service.store.jobs()) == 1 and setup.gmail.calls == []
     asyncio.run(exercise())
@@ -285,7 +286,7 @@ def test_continue_reports_missing_recipient_without_selecting_one(make_run_manag
         await service.execute_one()
         assert service.state(job['run_id']).awaiting_recipients
         result = await service.tasks.continue_task('s', 'continue')
-        assert '/recipients ' + job['run_id'] in result['message']
+        assert result['needs'] == 'recipients' and job['run_id'] not in result['message']
         assert 'job' not in result and setup.gmail.calls == []
     asyncio.run(exercise())
 

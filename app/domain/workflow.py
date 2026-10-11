@@ -65,6 +65,9 @@ class Recipient(Record):
 
 
 class WorkflowRequest(OutreachRequest):
+    # A known recipient can receive a requested draft without first being
+    # discovered and scored as a sales prospect. Contact rules still apply.
+    draft_mode: Literal['outreach', 'direct'] = 'outreach'
     attachments: list[Attachment] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
     research_material: str = Field(default="", strict=True, max_length=100000)
     sender: Sender = Field(default_factory=Sender)
@@ -175,6 +178,7 @@ class WorkflowState(OutreachState):
     """Extend the existing request state with durable execution information."""
 
     run_id: NonEmptyText
+    draft_mode: Literal['outreach', 'direct'] = 'outreach'
     attachments: list[Attachment] = Field(default_factory=list)
     documents: list[DocumentEvidence] = Field(default_factory=list)
     document_warnings: list[str] = Field(default_factory=list)

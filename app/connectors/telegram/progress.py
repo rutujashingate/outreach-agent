@@ -34,13 +34,23 @@ class TelegramProgress:
                 if item['finished'] is not None:
                     self.tracker.discard(key); self.sent.pop(key, None)
                 continue
-            start = item['started'] if item['started'] is not None else item['created']
-            elapsed = int((item['finished'] if item['finished'] is not None else moment) - start)
-            signature = (item['revision'], elapsed // 15, item['finished'] is not None)
+            if item['finished'] is not None:
+                if moment < self.next_message:
+                    continue
+                try:
+                    await self._call('deleteMessage', message_id=previous['message_id'])
+                except RateLimited as error:
+                    self.retry_at = moment + error.delay
+                    return
+                except (ToolError, TimeoutError):
+                    pass  # A cleanup failure cannot block the final answer.
+                self.tracker.discard(key); self.sent.pop(key, None)
+                self.next_message = moment + 1
+                break
+            signature = item['label']
             if moment < self.next_message or previous and (moment < previous['next_edit'] or signature == previous['signature']):
                 continue
-            text = f"{item['label']}\nElapsed: {elapsed}s"
-            if item['run_id']: text += '\nTask: ' + item['run_id']
+            text = item['label']
             try:
                 if previous:
                     await self._call('editMessageText', message_id=previous['message_id'], text=text)
@@ -50,8 +60,6 @@ class TelegramProgress:
                     message_id = response['message_id']
                 self.sent[key] = {'message_id': message_id, 'signature': signature, 'next_edit': moment + 3}
                 self.next_message = moment + 1
-                if item['finished'] is not None:
-                    self.tracker.discard(key); self.sent.pop(key, None)
             except RateLimited as error:
                 self.retry_at = moment + error.delay
                 return

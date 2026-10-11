@@ -74,6 +74,19 @@ Example JSON for `POST /api/runs`:
 
 Posting a run is an explicit instruction to prepare emails. Gmail fills a missing sender address from the connected account. A supplied address must match it for draft creation. Known recipients can be supplied by prospect ID or matching target name, for example `{"Example AI":{"email":"person@example.com"}}`; these take precedence over discovered addresses. To work without Gmail, choose `gmail_action: "none"` and provide recipient addresses for contact checking. Draft is the UI default; the underlying reusable request record defaults to `none`.
 
+For an ordinary email to a known recipient, set `draft_mode: "direct"`:
+
+```json
+{
+  "goal": "Write a short test email with the subject Hello.",
+  "draft_mode": "direct",
+  "recipients": {"recipient": {"email": "friend@example.com"}},
+  "gmail_action": "draft"
+}
+```
+
+Direct requests require at least one recipient, respect `max_qualified` as the draft batch limit, and use no search, browser, seed URLs, or email discovery flags. They skip prospect discovery/fit scoring and reuse writing, review, memory, opt-out checks, and the Gmail action ledger. Cold-outreach timing checks do not block these explicitly requested ordinary drafts. `draft_mode` defaults to `outreach`, preserving existing requests and checkpoints. The dashboard's current New run form still starts research outreach; direct drafting is available through normal Telegram conversation and this API.
+
 The trimmed goal must contain 1–2,000 characters. Booleans must be real JSON booleans, fields must be recognized, notes are bounded to 100,000 characters, and seed URLs to five. Invalid input returns 422, including `gmail_action: "send"`. A configured browser is required for `use_browser`; a Brave key for `use_search`. Requested Gmail drafts are saved after automated review and contact checks. The owner reviews and sends them manually in Gmail; no configuration flag enables agent sending.
 
 ## Upload and attach files

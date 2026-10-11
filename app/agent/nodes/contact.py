@@ -12,7 +12,7 @@ async def contact_node(state: WorkflowState, runtime: Runtime[WorkflowContext]) 
     outcomes = dict(state.outcomes)
     for prospect in state.qualified_prospects:
         recipient = state.recipients.get(prospect.id)
-        decision = check_contact(context.repository, recipient, context.limits)
+        decision = check_contact(context.repository, recipient, context.limits, cold_outreach=state.draft_mode != 'direct')
         if recipient is not None and recipient.email.casefold() in seen:
             decision = ContactDecision(allowed=False, reasons=["Duplicate recipient in the same run."])
         if recipient is not None:

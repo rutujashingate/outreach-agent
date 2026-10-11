@@ -139,6 +139,13 @@ class RunManager:
             )
 
     def validate_request(self, request: WorkflowRequest) -> None:
+        if request.draft_mode == 'direct':
+            if not request.recipients:
+                raise RunConflict('Sure — who should I address the email to?')
+            if len(request.recipients) > self.settings.limits.max_qualified:
+                raise RunConflict(f'I can prepare up to {self.settings.limits.max_qualified} drafts at a time. Which recipients should I start with?')
+            if request.use_search or request.use_browser or request.seed_urls or request.discover_emails:
+                raise RunConflict('For a draft to a known recipient, use the information already supplied. Research can be requested separately.')
         if self.settings.read_gmail and self.gmail is None:
             raise ConfigurationError("Gmail reading was requested; connect Gmail in the dashboard.")
         if request.use_search and self.search is None:

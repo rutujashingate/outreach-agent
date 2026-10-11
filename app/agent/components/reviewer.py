@@ -9,11 +9,12 @@ from app.agent.prompts.reviewer import REVIEW_INSTRUCTIONS
 
 
 async def review_draft(prospect: Prospect, strategy: OutreachStrategy, memories: list[MemoryFact],
-                       sender: Sender, draft: EmailDraft, client: ModelClient) -> ReviewResult:
+                       sender: Sender, draft: EmailDraft, client: ModelClient, *, brief: dict | None = None) -> ReviewResult:
     result = await generate_structured(instructions=REVIEW_INSTRUCTIONS, input_text=json.dumps({
         "research": prospect.model_dump(), "strategy": strategy.model_dump(),
         "memories": [fact.model_dump(mode="json") for fact in memories], "sender": sender.model_dump(),
         "draft": draft.model_dump(),
+        "direct_email_brief": brief,
     }), response_model=ReviewResult, client=client)
     if result.prospect_id != prospect.id:
         raise ModelResponseError("Reviewer referred to the wrong prospect.")

@@ -6,6 +6,7 @@ from app.agent.components.writer import write_draft
 from app.domain.workflow import Outcome, WorkflowState
 from app.agent.context import WorkflowContext
 from app.agent.nodes.common import allowed_prospects, failure, for_each
+from app.agent.nodes.direct import direct_brief
 
 
 async def writing_node(state: WorkflowState, runtime: Runtime[WorkflowContext]) -> dict:
@@ -27,7 +28,8 @@ async def writing_node(state: WorkflowState, runtime: Runtime[WorkflowContext]) 
     async def write(prospect):
         return await write_draft(prospect, state.strategies[prospect.id], state.memories.get(prospect.id, []),
             state.sender, context.client, previous=drafts.get(prospect.id),
-            feedback=state.reviews[prospect.id].issues if prospect.id in state.reviews else [])
+            feedback=state.reviews[prospect.id].issues if prospect.id in state.reviews else [],
+            brief=direct_brief(state))
     for prospect, result in await for_each(candidates, write, context, run_id=state.run_id, stage="writing"):
         if isinstance(result, Exception):
             outcomes[prospect.id] = failure(state, prospect.id, "writing")

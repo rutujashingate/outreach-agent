@@ -21,6 +21,7 @@ from app.agent.nodes.discovery import discovery_node
 from app.agent.nodes.external import external_node, finish_node
 from app.agent.nodes.goal import goal_node
 from app.agent.nodes.documents import prepare_documents
+from app.agent.nodes.direct import prepare_direct
 from app.agent.nodes.memory import memory_node
 from app.agent.nodes.qualification import qualification_node
 from app.agent.nodes.review import review_node
@@ -92,6 +93,7 @@ def build_outreach_graph():
 def build_full_graph(checkpointer):
     builder = StateGraph(WorkflowState, context_schema=WorkflowContext)
     builder.add_node("research", build_research_graph())
+    builder.add_node('direct_email', observed('direct_email', prepare_direct))
     builder.add_node("outreach", build_outreach_graph())
     for name, function in (
         ("prepare_recipients", prepare_recipients), ("choose_recipients", choose_recipients),
@@ -100,7 +102,9 @@ def build_full_graph(checkpointer):
         ("external_actions", external_node), ("finish", finish_node),
     ):
         builder.add_node(name, observed(name, function))
-    builder.add_edge(START, "research")
+    builder.add_conditional_edges(START, lambda state: 'direct_email' if state.draft_mode == 'direct' else 'research',
+                                  {'direct_email': 'direct_email', 'research': 'research'})
+    builder.add_edge('direct_email', 'memory_check')
     builder.add_conditional_edges("research", after_qualification,
                                   {"memory_check": "prepare_recipients", "finish": "finish"})
     builder.add_conditional_edges("prepare_recipients", lambda state: "choose_recipients" if state.recipient_requests else "memory_check",

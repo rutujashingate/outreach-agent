@@ -12,21 +12,20 @@ import time
 _observer = ContextVar('progress_observer', default=None)
 
 NODE_LABELS = {
-    'chat_understand': 'Thinking…', 'chat_decide': 'Planning the next step…',
-    'chat_answer': 'Preparing your reply…', 'prepare_documents': 'Reading your files…',
-    'interpret_goal': 'Understanding your goal…', 'research': 'Researching…',
-    'qualification': 'Checking prospect matches…', 'prepare_recipients': 'Checking recipient addresses…',
-    'choose_recipients': 'Waiting for your recipient choices.', 'memory_check': 'Checking previous conversations…',
-    'contact_policy': 'Checking contact rules…', 'strategy': 'Planning the emails…',
-    'writing': 'Drafting emails…', 'review': 'Reviewing the drafts…',
-    'prepare_approval': 'Preparing drafts for review…', 'human_approval': 'Waiting for your review.',
-    'external_actions': 'Saving the requested Gmail drafts…', 'finish': 'Saving the result…',
+    'chat_understand': 'Typing…', 'chat_decide': 'Typing…',
+    'chat_answer': 'Typing…', 'prepare_documents': 'Researching…',
+    'interpret_goal': 'Typing…', 'research': 'Researching…',
+    'qualification': 'Researching…', 'prepare_recipients': 'Researching…',
+    'choose_recipients': 'Typing…', 'memory_check': 'Researching…',
+    'contact_policy': 'Typing…', 'strategy': 'Typing…',
+    'writing': 'Typing…', 'review': 'Typing…', 'direct_email': 'Typing…',
+    'prepare_approval': 'Typing…', 'human_approval': 'Typing…',
+    'external_actions': 'Typing…', 'finish': 'Typing…',
 }
 TOOL_LABELS = {
-    'search': 'Searching the web…', 'read_page': 'Reading a website…',
-    'read_file': 'Reading your file…', 'search_saved': 'Searching saved documents…',
-    'research': 'Analyzing the research…', 'run_status': 'Checking saved task progress…',
-    'review': 'Reading the draft review…',
+    'search': 'Researching…', 'read_page': 'Researching…',
+    'read_file': 'Researching…', 'search_saved': 'Researching…',
+    'research': 'Researching…', 'run_status': 'Typing…', 'review': 'Typing…',
 }
 
 
@@ -53,22 +52,22 @@ class ProgressTracker:
                     return
             if paused and job['id'] in self._jobs and self._jobs[job['id']]['started'] is None:
                 item = self._jobs[job['id']]
-                item.update(label='Queue paused — your request is saved.', revision=item['revision'] + 1)
+                item.update(label='Queued…', revision=item['revision'] + 1)
             if job['id'] not in self._jobs and job.get('status') in {'queued', 'running'}:
                 self._jobs[job['id']] = {
                     'id': job['id'], 'run_id': job.get('run_id'), 'kind': job['kind'],
-                    'label': 'Queue paused — your request is saved.' if paused else 'Queued — waiting for the worker.',
+                    'label': 'Queued…',
                     'created': self.clock(), 'started': None, 'finished': None, 'revision': 0,
                 }
 
     @contextmanager
     def track(self, job):
         self.queued(job)
-        initial = {'chat': 'Thinking…', 'document': 'Reading your file…', 'replies': 'Checking Gmail replies…'}
+        initial = {'document': 'Researching…', 'replies': 'Researching…'}
         with self._lock:
             item = self._jobs.get(job['id'])
             if item:
-                item.update(started=self.clock(), label=initial.get(job['kind'], 'Working on your request…'))
+                item.update(started=self.clock(), label=initial.get(job['kind'], 'Typing…'))
                 item['revision'] += 1
         token = _observer.set(lambda event, details: self.record(job['id'], event, details))
         try:
@@ -83,9 +82,9 @@ class ProgressTracker:
         elif event == 'search_start': label = TOOL_LABELS['search']
         elif event == 'browser_start': label = TOOL_LABELS['read_page']
         elif event == 'model_start':
-            label = {'ConversationInstruction': 'Thinking…', 'ConversationAction': 'Thinking…',
-                     'EmailDraft': 'Drafting emails…', 'ReviewResult': 'Reviewing the drafts…',
-                     'ResearchResult': 'Analyzing the research…', 'ResearchAnalysis': 'Analyzing the research…'}.get(details.get('task'))
+            label = {'ConversationInstruction': 'Typing…', 'ConversationAction': 'Typing…',
+                     'EmailDraft': 'Typing…', 'ReviewResult': 'Typing…',
+                     'ResearchResult': 'Researching…', 'ResearchAnalysis': 'Researching…'}.get(details.get('task'))
         if label:
             with self._lock:
                 item = self._jobs.get(job_id)
@@ -96,14 +95,9 @@ class ProgressTracker:
         with self._lock:
             item = self._jobs.get(job_id)
             if item:
-                label = {'failed': 'Could not finish. Check the error message and dashboard.',
-                         'interrupted': 'Interrupted. Your saved task can be retried.',
-                         'stopped': 'Stopped — progress saved. Say continue to resume.',
-                         'cancelled': 'Task cancelled.'}.get(status)
-                if label is None:
-                    label = {'awaiting_recipients': 'Waiting for your recipient choices.',
-                             'awaiting_approval': 'Drafts ready for your review.'}.get(step)
-                item.update(finished=self.clock(), label=label or 'Finished — the result is ready.')
+                # Telegram removes the progress bubble. The durable final
+                # reply explains the result or asks for the owner's decision.
+                item.update(finished=self.clock(), status=status)
                 item['revision'] += 1
 
     def snapshot(self):

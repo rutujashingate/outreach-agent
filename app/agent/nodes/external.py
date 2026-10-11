@@ -49,7 +49,7 @@ async def external_node(state: WorkflowState, runtime: Runtime[WorkflowContext])
                 outcomes[prospect_id] = Outcome(prospect_id=prospect_id, status="blocked",
                     reason="Duplicate or uncertain external action; inspect action history.", source=source)
             continue
-        policy = check_contact(context.repository, recipient, context.limits)
+        policy = check_contact(context.repository, recipient, context.limits, cold_outreach=state.draft_mode != 'direct')
         if not policy.allowed or context.gmail is None or state.sender.email is None:
             outcomes[prospect_id] = Outcome(prospect_id=prospect_id, status="blocked",
                 reason=" ".join(policy.reasons) if not policy.allowed else "Gmail and a sender address are required.", source=source)
@@ -60,7 +60,7 @@ async def external_node(state: WorkflowState, runtime: Runtime[WorkflowContext])
             continue
         # Recheck under the contact lock so two workers with different messages
         # cannot both act on an old 'not recently contacted' decision.
-        policy = check_contact(context.repository, recipient, context.limits)
+        policy = check_contact(context.repository, recipient, context.limits, cold_outreach=state.draft_mode != 'direct')
         if not policy.allowed:
             context.repository.release_contact_action(recipient.email, key)
             outcomes[prospect_id] = Outcome(prospect_id=prospect_id, status="blocked",

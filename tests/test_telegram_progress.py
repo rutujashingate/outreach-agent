@@ -47,8 +47,9 @@ def test_one_status_message_changes_stages_and_typing_expires():
         assert len([m for m, _ in client.calls if m == 'sendMessage']) == 1
         edits = [p for m, p in client.calls if m == 'editMessageText']
         assert all(p['message_id'] == message_id for p in edits)
-        assert all(any(label in p['text'] for p in edits) for label in
-                   ('Thinking', 'Reading a website', 'Drafting emails', 'Reviewing', 'Finished'))
+        assert {p['text'] for p in edits} == {'Typing…', 'Researching…'}
+        assert any(m == 'deleteMessage' and p['message_id'] == message_id for m, p in client.calls)
+        assert not any('Task:' in str(p) or 'Elapsed:' in str(p) or 'Finished —' in str(p) for _, p in client.calls)
         assert all('PRIVATE' not in str(p) and 'private-example' not in str(p) for _, p in client.calls)
         count = len(client.calls)
         moment[0] = 40
@@ -57,7 +58,7 @@ def test_one_status_message_changes_stages_and_typing_expires():
     asyncio.run(exercise())
 
 
-def test_progress_edits_are_throttled_and_long_stage_has_elapsed_heartbeat():
+def test_long_stage_renews_typing_without_repeating_status_messages():
     moment = [0.0]
     clock = lambda: moment[0]
     tracker, client = ProgressTracker(clock), FakeTelegram()
@@ -69,7 +70,8 @@ def test_progress_edits_are_throttled_and_long_stage_has_elapsed_heartbeat():
                 moment[0] = second
                 await reporter.tick()
             edits = [p for m, p in client.calls if m == 'editMessageText']
-            assert len(edits) == 1 and 'Elapsed: 15s' in edits[0]['text']
+            assert edits == []
+            assert [p['text'] for m, p in client.calls if m == 'sendMessage'] == ['Typing…']
             assert len([m for m, _ in client.calls if m == 'sendChatAction']) == 5
     asyncio.run(exercise())
 
@@ -177,7 +179,7 @@ def test_real_worker_publishes_status_while_waiting_for_model(make_run_manager):
         try:
             await asyncio.wait_for(entered.wait(), timeout=3)
             await reporter.tick()
-            assert any('Thinking' in p.get('text', '') for _, p in client.calls)
+            assert any(p.get('text') == 'Typing…' for _, p in client.calls)
             assert any(m == 'sendChatAction' for m, _ in client.calls)
         finally:
             release.set()

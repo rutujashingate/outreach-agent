@@ -209,10 +209,12 @@ def test_telegram_conversation_uses_saved_knowledge_from_an_earlier_task(make_ru
         job=service.conversations.queue('What was in my earlier notes?','new-conversation',[],'new-turn')
         while await service.execute_one(): pass
         saved=service.store.get('chat:result:'+job['run_id'])
-        assert 'Sources:' in saved['text'] and '#page=2' in saved['text']
+        assert 'Sources:' in saved['text'] and 'Example source, page 2' in saved['text']
+        assert 'a'*32 not in saved['text']
         prompt=json.loads(setup.client.calls[-1].input_text)
         assert prompt['observations'][0]['tool']=='search_saved'
         assert prompt['observations'][0]['passages'][0]['purpose']=='background'
+        assert prompt['observations'][0]['passages'][0]['ref']=='document:'+'a'*32+'#page=2'
         assert setup.gmail.calls==[]
     asyncio.run(check())
 

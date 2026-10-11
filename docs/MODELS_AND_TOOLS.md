@@ -61,7 +61,9 @@ Completed model responses are cached using their exact task, input, schema, and 
 
 Task links, stop flags, and readable progress summaries use the database's service records. Supabase uses the same Postgres checkpoint adapter; otherwise storage stays local SQLite. The dashboard shows stop/continue controls, saved progress, and live storage validation. Storage checks make no Grok calls and do not replace quality evaluations of generated answers.
 
-Telegram also shows a temporary, updating stage message and a typing indicator while the worker runs. Model, tool, and workflow events select fixed labels such as thinking, reading, drafting, and reviewing. These messages contain no model reasoning or source contents. They do not approve drafts or control saved state. Their delivery runs separately from the worker and final replies; a failed progress update cannot repeat work. Database reads and event writes in the conversation/model path run in background threads so cloud latency does not freeze those indicators.
+Telegram shows a temporary status using only **Queued…**, **Researching…**, or **Typing…**, alongside the normal typing indicator. The status is removed when the result arrives. Timers, task IDs, internal step names, model reasoning, and source contents do not appear in these messages. Their delivery runs separately from the worker and final replies; a failed progress update or cleanup cannot repeat work. Database reads and event writes in the conversation/model path run in background threads so cloud latency does not freeze those indicators.
+
+An ordinary email to a known recipient uses `draft_mode: "direct"`. It skips discovery, qualification, and generated sales strategy, then uses the existing writing and review models. A simple direct draft therefore needs two workflow model calls, excluding conversation interpretation, optional Gmail memory extraction, or revisions. Research outreach keeps its existing stages and model routes. Both paths retain saved state, budgets, opt-outs, account checks, and the persistent Gmail action ledger. Direct drafting does not enable sending.
 
 ## Search saved knowledge
 

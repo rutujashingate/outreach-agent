@@ -15,6 +15,7 @@ from app.llm.client import ModelProviderError
 from app.services.limits import LimitExceeded
 from app.services.cancellation import RunStopped
 from app.services.background import run_loop
+from app.services.presentation import run_summary
 from app.services.runs import RunConflict, RunNotFound
 from app.storage.control import ControlStore, JobRow, RunMeta, now
 from app.storage.models import RunRow, TraceRow, ActionRow
@@ -204,7 +205,7 @@ class AgentService:
                 status = await self.conversations.execute(job)
                 await asyncio.to_thread(self.store.finish_job, job['id'], status)
                 if status == 'stopped':
-                    await asyncio.to_thread(self._notify, job['id'], f'Task stopped and progress saved. Say continue or /continue {run_id}.')
+                    await asyncio.to_thread(self._notify, job['id'], "I've stopped and saved your progress. Say continue when you're ready.")
                 return True
             if kind == "start": result = await self.manager.execute_new(run_id)
             elif kind == "decisions": result = await self.manager.resume(run_id, ApprovalSubmission.model_validate(job["payload"]))
@@ -229,26 +230,24 @@ class AgentService:
             step = result.state.current_step if result else None
             await asyncio.to_thread(self.store.finish_job, job["id"], status)
             if kind == 'document':
-                message = f"File ready: {document['filename']} ({len(document['content']['pages'])} pages/sections). Ask me a question about it, or inspect the text in the dashboard."
+                message = f"I've read {document['filename']}. What would you like to know about it?"
             elif kind in {'knowledge', 'storage_validation'}:
                 return True  # Reports belong in the dashboard, not extra chat messages.
-            else: message = (f"Run {run_id}: {result.state.current_step}.\nUse /review {run_id} or open the dashboard."
+            else: message = (run_summary(result.state)
                        if result else f"Reply check complete: {count} new messages processed.")
-            if result and result.state.gmail_action == 'draft':
-                drafted = [prospect for prospect, outcome in result.state.outcomes.items() if outcome.status == 'drafted']
-                if drafted:
-                    message = (f"Saved {len(drafted)} Gmail draft(s) for your request.\n" +
-                        '\n'.join(f"To: {result.state.recipients[p].email} — {result.state.drafts[p].subject}" for p in drafted) +
-                        "\n\nReview and edit them in Gmail → Drafts, then click Send yourself. Nothing has been sent."
-                        f"\nhttps://mail.google.com/mail/#drafts\nRun: {run_id}")
-            await asyncio.to_thread(self._notify, job["id"], message)
+            entries = []
+            if result and result.awaiting_approval:
+                entries = [('Review drafts', {'review_run': run_id})]
+            elif result and result.awaiting_recipients:
+                entries = [('Choose email addresses', {'recipient_run': run_id})]
+            await asyncio.to_thread(self._notify, job["id"], message, entries)
         except RunStopped:
             status = 'stopped'
             state = self.state(job['run_id']).state
             state.current_step = 'stopped'
             self.manager.repository.save_run(state, 'stopped')
             self.store.finish_job(job['id'], 'stopped')
-            self._notify(job['id'], f'Task stopped. Say continue or /continue {job["run_id"]}.')
+            self._notify(job['id'], "I've stopped and saved your progress. Say continue when you're ready.")
         except asyncio.CancelledError:
             status = 'interrupted'
             self.store.finish_job(job["id"], "interrupted", "Service stopped; inspect and retry.")
@@ -264,19 +263,18 @@ class AgentService:
             else:
                 explanation = "Work could not complete. Inspect the run and connector status in the dashboard."
             self.store.finish_job(job["id"], "failed", f"{type(error).__name__}: {explanation}")
-            if job['kind'] == 'chat':
-                self._notify(job['id'], f"I couldn't finish that message. {explanation}\nAfter resolving it, retry with /retry {job['run_id']}.")
-            else:
-                self._notify(job["id"], f"Work {job['id']} failed ({type(error).__name__}). {explanation}\nRun: {job['run_id'] or job['kind']}.")
+            entries = [('Try again', {'retry_task': job['run_id'], 'failed_job': job['id']})] if job['run_id'] else []
+            self._notify(job['id'], f"I couldn't finish that request. {explanation}", entries)
         finally:
             self.worker_busy = False
             self.progress.finish(job['id'], status, step)
         return True
 
-    def _notify(self, job_id, message):
+    def _notify(self, job_id, message, entries=None):
         owner = self.manager.settings.telegram_owner_id
         if owner:
-            self.store.notify(f"job:{job_id}", {"chat_id": owner, "text": message})
+            from app.connectors.telegram.messages import queue_message
+            queue_message(self.store, owner, f'job:{job_id}', message, entries)
 
     async def worker(self):
         await run_loop('outreach-worker', self.stopping, self.execute_one, self.background_health)
@@ -322,7 +320,8 @@ class AgentService:
                 stats["runs"] += 1
                 if row.status in stats: stats[row.status] += 1
                 stats["prospects"] += len(row.payload.get("prospects", []))
-                stats["qualified"] += len(row.payload.get("qualified_prospects", []))
+                if row.payload.get('draft_mode', 'outreach') != 'direct':
+                    stats["qualified"] += len(row.payload.get("qualified_prospects", []))
                 if row.status == "paused": stats["pending_approvals"] += len(row.payload.get("approval_requests", []))
             for action in session.scalars(select(ActionRow).where(ActionRow.status == "done")):
                 if action.kind == "send": stats["sent"] += 1

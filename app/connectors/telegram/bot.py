@@ -14,6 +14,7 @@ from app.services.background import TRANSIENT_DATABASE_ERRORS, run_loop, wait_or
 from app.connectors.search import ToolError
 from app.storage.control import OutboxRow, now
 from app.connectors.telegram.messages import queue_message
+from app.services.presentation import run_summary
 
 
 class TelegramBot:
@@ -49,21 +50,17 @@ class TelegramBot:
         response = self.service.state(run_id)
         state = response.state
         if response.awaiting_recipients:
-            self.say(f'Run {run_id} needs recipient choices. Use /recipients {run_id} to choose addresses, or use the dashboard.')
+            self.say('I need you to choose the email addresses first.', [('Choose email addresses', {'recipient_run': run_id})])
             return
         if not response.awaiting_approval:
-            if any(outcome.status == 'drafted' for outcome in state.outcomes.values()):
-                self.say(f'Run {run_id}: drafts saved. Review and send them yourself in Gmail → Drafts.\nhttps://mail.google.com/mail/#drafts')
-                return
-            self.say(f'Run {run_id}: {state.current_step}. No draft is waiting for approval.')
+            self.say(run_summary(state))
             return
         for item in state.approval_requests:
             choice = {'run_id': run_id, 'prospect_id': item.prospect.id, 'version': item.version, 'fingerprint': item.fingerprint}
-            text = (f'Run {run_id}\n{item.prospect.company_name}\nFrom: {state.sender.name} <{state.sender.email or "not configured"}>\n'
+            text = (f'{item.prospect.company_name}\nFrom: {state.sender.email or state.sender.name}\n'
                     f'To: {item.recipient.email}\nAddress source: {item.recipient.source}\n{item.recipient.evidence_quote}\n'
-                    f'Action after approval: {state.gmail_action}\nVersion: {item.version}\n\n'
                     f'Subject: {item.draft.subject}\n\n{item.draft.body}\n\nEvidence:\n' + '\n'.join(item.research_summary))
-            self.say(text, [(f'Approve {state.gmail_action}', {**choice, 'decision': 'approve'}),
+            self.say(text, [('Keep draft', {**choice, 'decision': 'approve'}),
                             ('Reject', {**choice, 'decision': 'reject'}), ('Edit', {**choice, 'decision': 'edit'})])
         self.say('Choose one decision for each draft, then submit the batch. Nothing is sent while choices are being collected.',
                  [('Submit decisions', {'submit': run_id}), ('Later', {'later': run_id})])
@@ -73,7 +70,7 @@ class TelegramBot:
         remaining = [pid for pid in state.recipient_requests if pid not in conversation['selections']]
         if not remaining:
             job = self.service.select_recipients(state.run_id, conversation['selections'], f'tg:{self.message_key}:recipients')
-            self.say(f'Recipient choices saved. Job {job["id"]} will continue the run.')
+            self.say("Thanks — I'll continue with those email addresses.")
             conversation.clear(); return
         pid = remaining[0]
         conversation.update(stage='recipient', prospect_id=pid)
@@ -139,9 +136,20 @@ class TelegramBot:
             if conversation.get('id') != value['conversation']:
                 raise RunConflict('This proposal belongs to an earlier conversation. Ask for a new one.')
             job = self.service.conversations.start_proposal(value['chat_proposal'], value['conversation'])
-            self.say(f"Outreach started: {job['run_id']}. You can keep talking while it runs. I will notify you when a decision is needed.")
+            self.say("Sure — I'll prepare your drafts and let you know when they're ready.")
         elif 'review_run' in value:
             self._review(value['review_run'])
+        elif 'recipient_run' in value:
+            response = self.service.state(value['recipient_run'])
+            if not response.awaiting_recipients:
+                raise RunConflict('Those email addresses have already been chosen.')
+            conversation.clear()
+            conversation.update(run_id=value['recipient_run'], selections={})
+            self._next_recipient(conversation)
+        elif 'retry_task' in value:
+            # One button belongs to one failed attempt, even if clicked twice.
+            self.service.retry(value['retry_task'], 'tg:retry-button:' + value['failed_job'])
+            self.say("I'll try that again using your saved progress.")
         elif 'decision' in value:
             decision = {k: value[k] for k in ('prospect_id', 'version', 'fingerprint')}
             if value['decision'] == 'edit':
@@ -149,14 +157,15 @@ class TelegramBot:
                 state = self.service.state(value['run_id']).state
                 if not any(r.fingerprint == value['fingerprint'] and r.version == value['version'] for r in state.approval_requests):
                     raise RunConflict('This draft is no longer current.')
-                conversation = {'stage': 'edit_subject', 'run_id': value['run_id'], 'decision': decision}
+                conversation.clear()
+                conversation.update(stage='edit_subject', run_id=value['run_id'], decision=decision)
                 self.say('Type the replacement subject.')
             else:
                 self.service.stage_decision(value['run_id'], ApprovalDecision(**decision, action=value['decision']))
                 self.say('Choice saved. Submit decisions when every draft has a choice.')
         elif 'submit' in value:
             job = self.service.submit_choices(value['submit'], f'tg:{self.message_key}:submit')
-            self.say(f'Decisions submitted. Job {job["id"]}.')
+            self.say("Thanks — I'll save your choices.")
         elif 'later' in value: self.say('The run remains paused. Use /review when ready.')
         elif 'recipient' in value:
             if conversation.get('stage') != 'recipient' or any(conversation.get(k) != value[k] for k in ('run_id','prospect_id')):
@@ -202,7 +211,12 @@ class TelegramBot:
         else:
             run_id, _ = self.service.tasks.select(session_id, identifier)
             result = self.service.tasks.stop(run_id)
-        self.say(result['message'])
+        entries = []
+        if result.get('needs') == 'review':
+            entries = [('Review drafts', {'review_run': result['run_id']})]
+        elif result.get('needs') == 'recipients':
+            entries = [('Choose email addresses', {'recipient_run': result['run_id']})]
+        self.say(result['message'], entries)
         return True
 
     async def _attachment(self, message, conversation):
@@ -277,12 +291,12 @@ class TelegramBot:
             conversation.clear(); conversation.update(run_id=arg.strip(), selections={})
             self._next_recipient(conversation)
         elif command == '/retry':
-            job = self.service.retry(arg.strip(), f'tg:{self.message_key}:retry'); self.say(f'Retry queued: {job["id"]}')
+            job = self.service.retry(arg.strip(), f'tg:{self.message_key}:retry'); self.say("I'll try that again using your saved progress.")
         elif command == '/cancel':
             if not arg: conversation.clear(); self.say('Conversation cancelled. Existing runs are unchanged; use /cancel RUN_ID to stop one.')
             else: self.service.cancel(arg.strip()); self.say('Cancellation requested. An action already in progress will record its result.')
         elif command == '/replies':
-            job = self.service.queue_replies(f'tg:{self.message_key}:replies'); self.say(f'Reply check queued: {job["id"]}')
+            job = self.service.queue_replies(f'tg:{self.message_key}:replies'); self.say("I'll check for new replies.")
         elif command == '/account':
             gmail = self.service.manager.gmail
             status = gmail.status() if gmail and hasattr(gmail, 'status') else {}

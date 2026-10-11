@@ -1,5 +1,16 @@
 # Local validation
 
+## Friendly Telegram conversation and direct email drafting — October 11, 2026
+
+- The reported test-email request was following company discovery and qualification, so an empty prospect list prevented drafting. Added a direct path for explicitly supplied recipients, joining the existing memory, contact, writing, review, and draft-saving steps. Requests to find new prospects still use research and qualification.
+- **526 tests passed** with `RUN_POSTGRES_TESTS=1 RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/pytest -o addopts='' -o faulthandler_timeout=30 -q --tb=short`. This includes real local PostgreSQL/pgvector, Chromium, and OCR. Fifteen new direct-drafting scenarios use fake external services and cover ordinary requests, opt-outs, active conversations, missing recipients, limits, review failures, duplicate clicks, saved continuation, remembered edits, and retry buttons.
+- Fake Telegram-to-Gmail checks produce one confirmed draft from repeated confirmation clicks, show its preview, and make no send call. A restart scenario reuses the saved writing result and completes review without repeating generation or saving twice. With no memory extraction or revisions, the direct workflow makes two model calls: writing and review. Conversation interpretation is separate.
+- Progress checks verify only **Queued…**, **Researching…**, and **Typing…**, with native typing and cleanup after completion. Replies omit timers and internal IDs. File and saved-library citations display source names and page numbers while retaining exact internal references in the evidence.
+- All four offline evaluation examples passed their existing scoring checks. These simulations verify workflow/scoring behavior, not real model quality. The revised architecture diagram was rendered and visually inspected.
+- Paused the idle queue and gracefully restarted the local service with the fix. Owner login and health returned successfully; Telegram and Gmail remained connected, Supabase remained the active database, and the queue returned to its previous unpaused setting. Credentials and stored requests were retained.
+
+Actual provider wording and a newly requested draft appearing in the owner's Gmail remain live acceptance checks. Diagnostics do not initiate paid model generation, an extra Telegram conversation, or a real Gmail draft/email. The agent continues to save only requested drafts; the owner reviews and clicks Send in Gmail.
+
 ## Telegram background recovery — October 11, 2026
 
 - The local process was alive, but `/health` returned HTTP 503 and `degraded`. Read-only Telegram checks confirmed the token was valid, no webhook was configured, and one update was waiting. No new chat job had been received. The old process also reported a closed database connection while shutting down; it had not recorded the original task exit, so that exception could not be identified retrospectively.

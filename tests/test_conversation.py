@@ -167,7 +167,9 @@ def test_file_caption_is_a_question_and_followup_has_cited_evidence(make_run_man
         assert await service.execute_one()  # Model reads that saved text.
         prompt = json.loads(setup.client.calls[1].input_text)
         assert '23 percent' in prompt['observations'][0]['content']
-        assert any('notes.txt, page 1' in text for text in await deliver(bot))
+        texts = await deliver(bot)
+        assert any('notes.txt, page 1' in text for text in texts)
+        assert all(document_id not in text for text in texts)
         await dispatch(bot, 2, 'What does that number mean?')
         await service.execute_one()
         assert '23 percent' in json.dumps(json.loads(setup.client.calls[2].input_text)['previous_evidence'])
@@ -362,9 +364,15 @@ def test_provider_failure_reaches_telegram_and_dashboard_without_blind_retry(
             assert record['error'] == failures[0]['message']
             assert record['error'] in service.store.jobs()[0]['error']
             with Session(service.store.engine) as session:
-                messages = [row.payload['text'] for row in session.scalars(select(OutboxRow))]
+                payloads = [row.payload for row in session.scalars(select(OutboxRow))]
+                messages = [payload['text'] for payload in payloads]
             assert len(messages) == 1 and record['error'] in messages[0]
-            assert '/retry ' + job['run_id'] in messages[0]
+            assert job['run_id'] not in messages[0]
+            retry = [button for payload in payloads
+                     for row in payload.get('reply_markup', {}).get('inline_keyboard', [])
+                     for button in row if button['text'] == 'Try again']
+            assert len(retry) == 1
+            assert service.store.get('button:' + retry[0]['callback_data'])['retry_task'] == job['run_id']
             assert 'private-secret' not in json.dumps([record['error'], failures, messages, service.store.jobs()])
     asyncio.run(check())
 
@@ -437,12 +445,12 @@ def test_explicit_draft_request_saves_only_after_owner_starts_proposal(tmp_path)
         await dispatch(bot, 1, 'Prepare a Gmail draft for PhD outreach')
         turn = service.store.jobs()[0]
         await service.execute_one()
-        assert 'Start outreach' in result(service, turn)['text']
-        assert 'Batch limit: up to 5' in result(service, turn)['text']
+        assert 'Create drafts' in result(service, turn)['text']
+        assert 'up to 5 email drafts' in result(service, turn)['text']
         assert service.list_runs()['total'] == 0 and manager.gmail.calls == []
         await deliver(bot)
         controls = [button for _, payload in bot.client.calls for row in payload.get('reply_markup', {}).get('inline_keyboard', [])
-                    for button in row if button['text'] == 'Start outreach']
+                    for button in row if button['text'] == 'Create drafts']
         assert len(controls) == 1
         for update_id in [2, 3]:  # Repeated clicks cannot start duplicate outreach.
             service.store.accept_updates([{'update_id': update_id, 'callback_query': {

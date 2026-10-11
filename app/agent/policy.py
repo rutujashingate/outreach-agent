@@ -19,7 +19,7 @@ def message_fingerprint(sender: Sender, recipient: Recipient, draft: EmailDraft,
 
 
 def check_contact(repository: Repository, recipient: Recipient | None, limits: Limits,
-                  *, now: datetime | None = None) -> ContactDecision:
+                  *, now: datetime | None = None, cold_outreach: bool = True) -> ContactDecision:
     if recipient is None:
         return ContactDecision(allowed=False, reasons=["No recipient address was explicitly supplied."])
     now = now or utc_now()
@@ -27,11 +27,13 @@ def check_contact(repository: Repository, recipient: Recipient | None, limits: L
     reasons = []
     if contact["opted_out"]:
         reasons.append("The contact opted out.")
-    if contact["active_conversation"]:
+    # An owner-requested ordinary draft can be a reply to an active thread.
+    # Cold-outreach timing rules still protect prospect-discovery runs.
+    if cold_outreach and contact["active_conversation"]:
         reasons.append("An active conversation should not receive new cold outreach.")
-    if contact["reconnect_at"] and datetime.fromisoformat(contact["reconnect_at"]) > now:
+    if cold_outreach and contact["reconnect_at"] and datetime.fromisoformat(contact["reconnect_at"]) > now:
         reasons.append("The requested reconnect date has not arrived.")
-    if contact["last_contact_at"] and datetime.fromisoformat(contact["last_contact_at"]) > now - timedelta(days=limits.recent_contact_days):
+    if cold_outreach and contact["last_contact_at"] and datetime.fromisoformat(contact["last_contact_at"]) > now - timedelta(days=limits.recent_contact_days):
         reasons.append("The contact was reached too recently.")
     if repository.has_pending_action(recipient.email):
         reasons.append("A previous external action is pending or needs reconciliation.")
