@@ -107,7 +107,11 @@ If you explicitly ask to prepare outreach emails, it proposes a request and show
 
 `/guided` retains the original goal → background → research options → addresses → action questions. In that optional flow, `-` reuses your saved background or indicates no known recipients. `/chat` leaves guided questions. Use the dashboard’s Connections page to save your name and accurate background before live outreach.
 
-Each ordinary message is a durable job, so commands remain responsive during model work. Queue pause also pauses chat processing. Interrupted turns require `/retry RUN_ID`; completed replies and their outgoing messages are reused on recovery. Chat uses at most six model attempts and five tool selections per message by default, also subject to the existing search/page/cost limits. `max_chat_model_calls` and `max_chat_tool_calls` can be overridden in `OUTREACH_LIMITS_JSON`. Estimates are reservations, not provider bills. The dashboard's job list and usage totals include chat; its outreach-run list counts outreach only.
+Each ordinary message is a durable job, so commands remain responsive during model work. Queue pause also pauses chat processing. Chat uses at most six model attempts and five tool selections per message by default, also subject to the existing search/page/cost limits. `max_chat_model_calls` and `max_chat_tool_calls` can be overridden in `OUTREACH_LIMITS_JSON`. Estimates are reservations, not provider bills. The dashboard's job list and usage totals include chat; its outreach-run list counts outreach only.
+
+**Stop and continue:** say **stop** or use `/stop RUN_ID` to pause work at the next safe step. A call already underway finishes recording its result. Say **continue** or `/continue RUN_ID` to resume the same task. The bot remembers the original request, collected evidence, tool results, and next step across a service restart. If several tasks are unfinished, it lists their IDs instead of guessing. If a task needs an address or review decision, it shows the appropriate control; “continue” never approves anything. Completed tasks are not restarted, and `/cancel RUN_ID` remains permanent cancellation. `/new` starts a separate conversation; use an explicit task ID to return to older work.
+
+The dashboard also offers **Stop and save progress** and **Continue saved task**. A saved continuation waits if the queue is paused. Failed model access still needs its account/configuration problem resolved before continuation. Budgets remain spent. Completed model/search/page reads can be reused; a call interrupted before its result was saved may have to run again. Uncertain Gmail writes remain blocked for inspection. Older chat turns created before chat checkpointing can restart only from the input saved at that time. Outreach checkpoints remain compatible.
 
 | Command | Result |
 |---|---|
@@ -117,7 +121,9 @@ Each ordinary message is a durable job, so commands remain responsive during mod
 | `/runs`, `/status RUN_ID` | Recent runs or current progress. |
 | `/review RUN_ID` | Gmail draft completion guidance, or review choices for app-only drafts and older pending approvals. |
 | `/recipients RUN_ID` | Resolve missing or ambiguous recipient addresses. |
-| `/retry RUN_ID`, `/cancel RUN_ID` | Retry failed work or request a stop at the next safe boundary. |
+| `stop`, `/stop [RUN_ID]` | Save a resumable stop request; finish recording an in-flight call. |
+| `continue`, `/continue [RUN_ID]` | Resume the same saved task, or show a pending decision. |
+| `/retry RUN_ID`, `/cancel RUN_ID` | Retry failed work, or permanently cancel a run. |
 | `/files`, `/clearfiles` | Show current file IDs/status, or detach files from the goal conversation. |
 | `/retryfile FILE_ID` | Queue a failed/interrupted file for another local read. |
 | `/replies` | Queue a reply check for tracked Gmail conversations. |

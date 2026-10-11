@@ -28,7 +28,9 @@ Use a stable `Idempotency-Key` header for each intended queued action. Repeating
 | `POST /api/runs/{id}/submit` | Queue all saved choices as one validated batch; returns 202. |
 | `POST /api/runs/{id}/decisions` | Submit a full `{"decisions":[...]}` batch directly; returns 202. |
 | `POST /api/runs/{id}/recipients` | Resolve all pending addresses or skips; returns 202. |
-| `POST /api/runs/{id}/retry` | Queue an explicit retry of failed/interrupted execution; returns 202. |
+| `POST /api/runs/{id}/retry` | Queue an explicit retry of failed/interrupted/stopped execution; returns 202. Saved budgets are retained. |
+| `POST /api/runs/{id}/stop` | Request a resumable stop. An in-flight operation finishes recording its result. Returns 202 with a message and run ID, without creating a job. |
+| `POST /api/runs/{id}/continue` | Inspect and resume saved work. Returns 202 with `{run_id, message, job?}`; `job` is present only when work is queued. Pending decisions, active work, and completed/cancelled tasks return an explanation. Repeated idempotency keys reuse the same job. |
 | `POST /api/runs/{id}/cancel` | Save a stop request and cancel queued work; returns 202 with run ID and `cancel_requested` status. This is a control flag, not a new job. |
 | `PUT /api/queue` | Set `{"paused":true}` or `false`; does not interrupt an active job. |
 | `PUT /api/profile` | Save sender `name`, optional `email`, and `context` for new Telegram/dashboard requests. |
@@ -39,6 +41,8 @@ Use a stable `Idempotency-Key` header for each intended queued action. Repeating
 | `POST /api/connectors/gmail/disconnect` | Remove encrypted local credentials and attempt revocation at Google. |
 
 The retired `/outreach`, `/runs`, interactive CLI, and public OpenAPI docs are not entry points in this application.
+
+Run details include `saved_progress` when available: `next_steps` names saved graph steps, and chat also reports `completed_tools`. Chat has a separate checkpoint thread (`chat:RUN_ID`) in the configured database. Continuing uses the original inputs rather than a new goal. Connector status includes non-secret `model_routes` when xAI routing is active.
 
 ## Start a run
 

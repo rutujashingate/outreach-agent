@@ -5,6 +5,7 @@ research and writing; all progress and approvals belong to the same saved run.
 """
 
 import time
+import json
 
 from langgraph.errors import GraphInterrupt
 from langgraph.graph import END, START, StateGraph
@@ -12,7 +13,7 @@ from langgraph.runtime import Runtime
 
 from app.domain.workflow import WorkflowState
 from app.storage.events import trace
-from app.agent.context import WorkflowContext
+from app.agent.context import WorkflowContext, model_cache_scope
 from app.agent.nodes.recipients import prepare_recipients, choose_recipients
 from app.agent.nodes.approval import human_approval, prepare_approval
 from app.agent.nodes.contact import contact_node
@@ -37,6 +38,7 @@ def observed(name, function):
         from app.services.cancellation import check_cancelled
         check_cancelled(context.repository, state.run_id)
         trace(context.repository, state.run_id, "node_start", node=name)
+        scope = model_cache_scope.set(json.dumps([name, state.revision_counts, state.draft_versions], sort_keys=True))
         try:
             result = await function(state, runtime)
         except GraphInterrupt:
@@ -45,6 +47,8 @@ def observed(name, function):
         except Exception as error:
             trace(context.repository, state.run_id, "node_failure", node=name, error_type=type(error).__name__)
             raise
+        finally:
+            model_cache_scope.reset(scope)
         trace(context.repository, state.run_id, "node_end", node=name,
               seconds=time.monotonic() - started, current_step=result.get("current_step"))
         if name in {"qualification", "contact_policy", "prepare_approval", "human_approval", "review"}:

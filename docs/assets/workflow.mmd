@@ -23,15 +23,15 @@ flowchart TD
     accDescr: Telegram messages enter a saved queue. LangGraph answers questions and uses reading tools. Only an explicit email request and the owner's Start outreach action enter drafting. The workflow researches, qualifies, resolves recipients, checks contacts, writes and reviews drafts. Requested Gmail drafts are saved once and announced. The owner reviews, edits and sends in Gmail, outside the agent. App-only drafts retain review controls. SQLite or one Supabase PostgreSQL database holds saved state.
     telegram["Private Telegram<br/>Normal messages, files and decisions"] --> service["Shared service<br/>Saved queue and one worker"]
     dashboard["Owner dashboard<br/>Connections and controls"] --> service
-    service --> chat["LANGGRAPH CONVERSATION<br/>Understand message + recent history"]
-    chat -->|Read evidence| tools["Bounded read-only tools<br/>Files · browser · search · run status"]
+    service --> chat["LANGGRAPH CONVERSATION<br/>4.3 instructions · 4.20 reasoning/tools<br/>Saved request + step + collected evidence"]
+    chat -->|Read evidence| tools["Bounded read-only tools<br/>Files · browser · search · run status<br/>Multi-Agent evidence analysis when needed"]
     tools --> chat
     chat -->|Answer or clarify| answer["Reply in Telegram<br/>Continue the conversation"]
     chat -->|Email drafts requested| proposal["Show request + Start outreach button"]
     proposal -->|Owner starts it| files["Optional uploaded files<br/>Read text / local OCR · save cited evidence"]
     service -->|Dashboard or guided outreach| files
     files --> goal["LANGGRAPH<br/>Interpret the goal"]
-    goal --> research["Research prospects + sources<br/>Files · notes · Brave · public browser"]
+    goal --> research["Research prospects + sources<br/>Files · notes · Brave · public browser<br/>4.20 Multi-Agent evidence analysis"]
     research --> qualification{"Qualified prospects?"}
     qualification -->|Yes| recipients["Resolve recipient addresses<br/>Published evidence or owner selection"]
     qualification -->|No| outcome["Save outcomes + relationship history"]
@@ -50,7 +50,7 @@ flowchart TD
     action --> notify["Notify owner: drafts are ready"]
     notify --> manual["YOU, IN GMAIL<br/>Review → edit → click Send"]
     store[("SQLite OR Supabase Postgres<br/>Jobs, conversation, checkpoints and choices<br/>File text, events and action ledger")]
-    service -. Save and resume .-> store
+    service -. Stop and continue same task .-> store
     approval -. Saved pause .-> store
     outcome -. Persist .-> store
     classDef decision fill:#fff6e6,stroke:#caa65d,color:#5b451b;

@@ -303,6 +303,7 @@ function renderOverview(data) {
         metric("Qualified prospects", s.qualified),
         metric("Completed runs", s.completed),
         metric("Failed runs", s.failed),
+        metric("Stopped runs", s.stopped || 0),
         metric("Replies processed", s.replies),
       ),
       panel(
@@ -354,7 +355,7 @@ function renderOverview(data) {
       node(
         "p",
         { class: "muted" },
-        `${data.job_counts.running || 0} running · ${data.job_counts.completed || 0} completed · ${data.job_counts.failed || 0} failed · ${data.job_counts.interrupted || 0} interrupted`,
+        `${data.job_counts.running || 0} running · ${data.job_counts.completed || 0} completed · ${data.job_counts.failed || 0} failed · ${data.job_counts.interrupted || 0} interrupted · ${data.job_counts.stopped || 0} stopped`,
       ),
       ...data.jobs
         .slice(0, 8)
@@ -544,6 +545,17 @@ function renderConnections(c) {
 function renderDetail(data) {
   const state = data.state;
   const controls = [];
+  if (["failed", "stopped"].includes(data.status))
+    controls.push(button("Continue saved task", async () => {
+      const result = await post(`/api/runs/${runId}/continue`);
+      alert(result.message);
+      await refresh();
+    }));
+  if (["queued", "running"].includes(data.status))
+    controls.push(button("Stop and save progress", async () => {
+      await post(`/api/runs/${runId}/stop`);
+      await refresh();
+    }));
   if (data.status === "failed")
     controls.push(
       button("Retry", async () => {
@@ -590,6 +602,8 @@ function renderDetail(data) {
         node("div", { class: "actions" }, ...controls),
       ),
       data.error ? node("p", {}, data.error) : null,
+      data.saved_progress?.next_steps?.length ? node("p", { class: "muted" },
+        `Saved next step: ${data.saved_progress.next_steps.join(", ")}${data.saved_progress.completed_tools !== undefined ? ` · ${data.saved_progress.completed_tools} tool results retained` : ""}`) : null,
       node(
         "p",
         { class: "muted" },

@@ -5,7 +5,7 @@ import asyncio
 from app.domain.workflow import Outcome, WorkflowState
 from app.agent.context import WorkflowContext
 from app.storage.events import trace
-from app.services.cancellation import RunCancelled
+from app.services.cancellation import RunCancelled, RunStopped
 
 
 async def for_each(prospects, operation, context: WorkflowContext, *, run_id: str, stage: str):
@@ -16,14 +16,20 @@ async def for_each(prospects, operation, context: WorkflowContext, *, run_id: st
         async with semaphore:
             try:
                 return prospect, await operation(prospect)
-            except RunCancelled:
+            except (RunCancelled, RunStopped):
                 raise
             except Exception as error:
                 trace(context.repository, run_id, "prospect_failure", stage=stage,
                       prospect_id=prospect.id, error_type=type(error).__name__)
                 return prospect, error
 
-    return await asyncio.gather(*(execute(prospect) for prospect in prospects))
+    # Let calls already underway finish recording before reporting a stop.
+    # Otherwise a retry could start while another prospect's call is still live.
+    results = await asyncio.gather(*(execute(prospect) for prospect in prospects), return_exceptions=True)
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+    return results
 
 
 def allowed_prospects(state: WorkflowState):

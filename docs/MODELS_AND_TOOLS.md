@@ -50,3 +50,13 @@ Connections shows the configured roles. Saved `model_start`, `model_end`, and `m
 These routes are owner-selected, not a claim that comparative quality evaluations proved them optimal. A live test still needs account credits and permission for all three models. The old optional measurement-based router remains available to evaluation code.
 
 Provider references: [function calling](https://docs.x.ai/developers/tools/function-calling), [multi-agent restrictions and agent counts](https://docs.x.ai/developers/model-capabilities/text/multi-agent), [4.3](https://docs.x.ai/developers/models/grok-4.3), [4.20 reasoning](https://docs.x.ai/developers/models/grok-4.20-0309-reasoning).
+
+## Saved work and continuation
+
+Both chat and outreach save LangGraph checkpoints. Chat stores its original inputs, instruction pass, selected action, tool observations, step count, and final answer. The server uses a separate `chat:RUN_ID` thread in the same checkpoint store, so its data cannot overwrite outreach state.
+
+Say **stop**, then **continue**. The service finds the unfinished task in that conversation and resumes its saved next step. If the service was interrupted, restart it and say **continue**. Use `/continue RUN_ID` when more than one task is unfinished or you started a new conversation. A pending recipient choice or review requires that decision; ordinary continuation does not supply it. Permanent cancellation remains `/cancel RUN_ID`.
+
+Completed model responses are cached using their exact task, input, schema, and workflow revision. A cache is a saved result that can be reused. Search and browser results are also cached per run. This protects work completed inside a step that had not yet reached its next checkpoint. Intentional revisions still receive a new review, even if the revised email text happens to be identical. Failed requests are not cached, and usage reservations are never refunded or reset by continuation. A network call interrupted before its result was saved can be repeated; Gmail writes keep their separate duplicate/uncertainty protection.
+
+Task links, stop flags, and small readable progress summaries use the existing database's service records. No additional database or credentials are needed. Supabase works through the same existing Postgres checkpoint adapter when configured; otherwise storage stays local SQLite. The dashboard shows stop/continue controls and saved progress. The broader validation dashboard remains a separate feature.

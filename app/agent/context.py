@@ -3,9 +3,14 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from contextvars import ContextVar
 import time
+import json
 
 from app.storage.repository import Repository
+from app.storage.repository import stable_id
+from app.storage.control import ControlStore
+from app.llm.client import generate_structured
 from app.llm.client import ModelClient, ModelClientError, ModelProviderError, ModelResponseError
 from app.domain.workflow import MemoryFact, SearchResult
 from app.storage.events import trace
@@ -15,6 +20,11 @@ from app.connectors.search import SearchTool, ToolError
 from app.services.cancellation import check_cancelled
 
 
+# A new review/revision is new work even when the resulting email is identical.
+# Context-local scope also keeps concurrently processed prospects independent.
+model_cache_scope = ContextVar('model_cache_scope', default='')
+
+
 class ManagedModelClient:
     """Reserve calls and estimated cost, bound duration, and record outcomes."""
 
@@ -22,6 +32,7 @@ class ManagedModelClient:
         self.client, self.repository, self.run_id, self.limits = client, repository, run_id, limits
         self.semaphore = asyncio.Semaphore(limits.concurrency)
         self.consecutive_failures = 0
+        self.store = ControlStore(repository.engine)
 
     @property
     def supports_task_routing(self):
@@ -29,6 +40,14 @@ class ManagedModelClient:
 
     async def generate_structured(self, *, instructions, input_text, response_model):
         async with self.semaphore:
+            check_cancelled(self.repository, self.run_id)
+            key = 'model:result:' + self.run_id + ':' + stable_id(
+                model_cache_scope.get(), response_model.__name__, instructions, input_text,
+                json.dumps(response_model.model_json_schema(), sort_keys=True))
+            saved = self.store.get(key)
+            if saved is not None:
+                trace(self.repository, self.run_id, 'model_cache_hit', task=response_model.__name__)
+                return response_model.model_validate(saved)
             if self.consecutive_failures >= 3:
                 raise ModelClientError("Model requests were stopped after repeated failures.")
             # Transport/server failures get one retry. Configuration failures,
@@ -41,9 +60,13 @@ class ManagedModelClient:
                 trace(self.repository, self.run_id, "model_start", task=response_model.__name__, attempt=attempt, **route)
                 try:
                     async with asyncio.timeout(self.limits.model_timeout):
-                        result = await self.client.generate_structured(
+                        result = await generate_structured(client=self.client,
                             instructions=instructions, input_text=input_text, response_model=response_model,
                         )
+                    # A node may process several prospects before checkpointing.
+                    # Retain each validated answer so a later stop does not
+                    # repeat the already completed, paid calls in that node.
+                    self.store.put(key, result.model_dump(mode='json'))
                     self.consecutive_failures = 0
                     trace(self.repository, self.run_id, "model_end", task=response_model.__name__,
                           seconds=time.monotonic() - started, usage=getattr(self.client, "last_usage", {}),
@@ -71,6 +94,13 @@ class ManagedSearchTool:
         self.tool, self.repository, self.run_id, self.limits = tool, repository, run_id, limits
 
     async def search(self, query: str) -> list[SearchResult]:
+        check_cancelled(self.repository, self.run_id)
+        store = ControlStore(self.repository.engine)
+        key = 'search:result:' + self.run_id + ':' + stable_id(query)
+        saved = store.get(key)
+        if saved is not None:
+            trace(self.repository, self.run_id, 'search_cache_hit')
+            return [SearchResult.model_validate(item) for item in saved['results']]
         for attempt in range(2):
             check_cancelled(self.repository, self.run_id)
             self.repository.reserve_call(self.run_id, "search", self.limits)
@@ -80,6 +110,7 @@ class ManagedSearchTool:
                 async with asyncio.timeout(self.limits.search_timeout):
                     results = await self.tool.search(query)
                 trace(self.repository, self.run_id, "search_end", count=len(results), seconds=time.monotonic() - started)
+                store.put(key, {'results': [item.model_dump(mode='json') for item in results[:self.limits.max_search_results]]})
                 return results[:self.limits.max_search_results]
             except (ToolError, TimeoutError) as error:
                 trace(self.repository, self.run_id, "search_failure", error_type=type(error).__name__)

@@ -1,5 +1,20 @@
 # Local validation
 
+## Model roles, tool calls, and task continuation — October 10, 2026
+
+- **470 tests passed** with `RUN_POSTGRES_TESTS=1 RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/pytest -o addopts='' -q --tb=short`. Real local Chromium, OCR, and temporary Postgres checks were enabled; no cloud credentials were required.
+- Mocked xAI Responses requests verified the 4.3 → 4.20 tool selection → Multi-Agent analysis → 4.20 answer sequence. A separate outreach scenario verified all six task-to-model routes. Native function names, arguments, capabilities, call/result IDs, and limits were checked. Unsupported tool calls were rejected.
+- A real SQLite checkpoint was closed and reopened after a page read and model failure. A plain Telegram **continue** resumed the same goal/run ID with retained evidence, no second browser visit, and the original usage counters. Other checks cover stopped queued work, stop during a read, saved results before a checkpoint, completed-task recovery, ambiguous task selection, retention after many later questions, and a fresh proposal after continuing an older task.
+- Continue did not approve a draft or select a missing recipient. Permanent cancellation and exhausted budgets remained enforced. A stopped outreach run resumed without repeating completed model stages and created one fake Gmail draft.
+- All four simulated evaluations passed. JavaScript syntax and Git whitespace checks passed. The Mermaid diagram was rendered and visually inspected for the updated README.
+- Only non-secret routing fields were changed in local `.env`. Credentials and local databases were preserved. No paid model call or real Telegram/Gmail message was sent; the running real service was not restarted.
+
+**Live checks still needed:** restart the service, verify xAI account access to all three configured models, then test a real conversation and requested draft. Simulated responses test integration behavior, not actual model quality. Multi-agent research analyzes evidence from the application's tools; provider-hosted search is not enabled. The broader validation dashboard has not been added.
+
+## Model routing and tool calls — October 10, 2026
+
+130 focused tests passed across model routing, xAI compatibility, conversation, full outreach, checkpoints/controls, authenticated API, and the shared service. `node --check app/web/static/app.js` passed. New mocked HTTP checks exercised the requested three-model sequence and native function calls through the actual graph; invalid tool requests were rejected. No live provider generation or real Telegram/Gmail message was sent. All model routes still need live account access and a quality check on real inputs. Local `.env` changes were limited to non-secret role settings and preserved existing credentials.
+
 ## Supabase state and requested drafts — October 10, 2026
 
 - **443 tests passed** with `RUN_POSTGRES_TESTS=1 RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/python -m pytest -o addopts='' -q --tb=short`. This includes real local Chromium, OCR, and a disposable PostgreSQL 16 cluster. Supabase cloud credentials were not used. A final connector-message wording change also passed the 10 Gmail OAuth tests.
@@ -95,6 +110,3 @@ Existing local `.env` credentials and database files were preserved. Manual serv
 - **Docker build/run and Linux hosting:** Docker is not installed on the development machine. Dockerfile/Compose packaging is provided, but a container build and host-specific Chromium sandbox operation have not been verified. Remote hosting has not been performed.
 
 Follow [setup](SETUP.md) for these checks. Local implementation is complete; live connector acceptance remains separate until the configured accounts and hosting environment are exercised.
-# Model routing and tool calls — 2026-10-10
-
-130 focused tests passed across model routing, xAI compatibility, conversation, full outreach, checkpoints/controls, authenticated API, and the shared service. `node --check app/web/static/app.js` passed. New mocked HTTP checks exercised the requested three-model sequence and native function calls through the actual graph; invalid tool requests were rejected. No live provider generation or real Telegram/Gmail message was sent. All model routes still need live account access and a quality check on real inputs. Local `.env` changes were limited to non-secret role settings and preserved existing credentials.

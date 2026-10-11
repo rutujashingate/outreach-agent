@@ -1,8 +1,8 @@
 """A LangGraph conversation loop: decide, read evidence, and answer.
 
 Unlike the outreach graph, this graph can finish with an ordinary answer.
-The service saves each turn and its history; a stopped turn needs explicit
-retry. Model and tool budgets are stored separately and survive that retry.
+The service checkpoints every step. A stopped turn resumes with its original
+inputs, observations, and tool call IDs. Budgets survive that continuation.
 """
 from dataclasses import dataclass
 import json
@@ -15,6 +15,7 @@ from app.agent.prompts.conversation import CONVERSATION_INSTRUCTIONS
 from app.domain.conversation import ConversationAction, ConversationInstruction
 from app.llm.client import generate_structured
 from app.services.cancellation import check_cancelled
+from app.agent.context import model_cache_scope
 
 
 class ConversationState(TypedDict):
@@ -23,6 +24,7 @@ class ConversationState(TypedDict):
     action: dict
     result: dict
     instruction: dict
+    inputs: dict
 
 
 @dataclass
@@ -89,12 +91,28 @@ async def answer(state: ConversationState, runtime: Runtime[ConversationContext]
     return {'result': result}
 
 
-def build_conversation_graph():
+def build_conversation_graph(checkpointer):
+    from app.storage.events import trace
+
+    def observed(name, function):
+        async def node(state, runtime):
+            context = runtime.context
+            check_cancelled(context.service.manager.repository, context.run_id)
+            trace(context.service.manager.repository, context.run_id, 'node_start', node='chat_' + name)
+            scope = model_cache_scope.set(f"chat:{name}:{state.get('steps', 0)}")
+            try:
+                result = await function(state, runtime)
+            finally:
+                model_cache_scope.reset(scope)
+            trace(context.service.manager.repository, context.run_id, 'node_end', node='chat_' + name)
+            return result
+        return node
+
     builder = StateGraph(ConversationState, context_schema=ConversationContext)
-    builder.add_node('understand', understand)
-    builder.add_node('decide', decide)
-    builder.add_node('read_tool', read_tool)
-    builder.add_node('answer', answer)
+    builder.add_node('understand', observed('understand', understand))
+    builder.add_node('decide', observed('decide', decide))
+    builder.add_node('read_tool', observed('read_tool', read_tool))
+    builder.add_node('answer', observed('answer', answer))
     builder.add_edge(START, 'understand')
     builder.add_conditional_edges('understand', lambda state:
         'answer' if state.get('instruction', {}).get('action') in {'reply', 'outreach'} else 'decide')
@@ -102,4 +120,4 @@ def build_conversation_graph():
         'answer' if state['action']['action'] in {'reply', 'outreach'} else 'read_tool')
     builder.add_edge('read_tool', 'decide')
     builder.add_edge('answer', END)
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)

@@ -23,7 +23,7 @@ from app.domain.workflow import Sender, WorkflowRequest, WorkflowState
 from app.llm.client import ModelProviderError, ModelResponseError, generate_structured
 from app.llm.tools import TOOL_FIELDS
 from app.domain.research import ResearchAnalysis
-from app.services.cancellation import RunCancelled, check_cancelled
+from app.services.cancellation import RunCancelled, RunStopped, check_cancelled
 from app.services.limits import LimitExceeded
 from app.services.runs import ConfigurationError, RunConflict, RunNotFound
 from app.storage.control import JobRow, ValueRow
@@ -33,12 +33,18 @@ from app.storage.events import trace
 class ConversationService:
     def __init__(self, service):
         self.service, self.manager, self.store = service, service.manager, service.store
-        self.graph = build_conversation_graph()
+        self.graph = build_conversation_graph(self.manager.checkpointer)
+
+    def config(self, run_id):
+        # Separate graph IDs keep chat checkpoints away from outreach state.
+        return {'configurable': {'thread_id': 'chat:' + run_id},
+                'recursion_limit': self.manager.settings.limits.max_graph_steps}
 
     def queue(self, message, session_id, attachments, key):
         """Save a turn immediately; model calls belong to the background worker."""
         existing = self.store.find_job(key)
         if existing:
+            self.service.tasks.remember(session_id, existing['run_id'])
             return existing
         if not isinstance(message, str) or not 1 <= len(message.strip()) <= 4000:
             raise RunConflict('Please keep each message between 1 and 4,000 characters.')
@@ -50,6 +56,7 @@ class ConversationService:
         state = WorkflowState(run_id=uuid4().hex, goal=message.strip()[:2000], attachments=references)
         job = self.store.enqueue('chat', state.run_id, {'message': message.strip(), 'session_id': session_id},
                                  key, state=state, origin='telegram', run_kind='chat')
+        self.service.tasks.remember(session_id, job['run_id'])
         return job
 
     def retry_payload(self, run_id):
@@ -68,7 +75,7 @@ class ConversationService:
             check_cancelled(self.manager.repository, run_id)
             if cached is None:
                 self.manager.repository.save_run(state, 'running')
-                trace(self.manager.repository, run_id, 'node_start', node='conversation')
+                snapshot = await self.graph.aget_state(self.config(run_id))
                 history = self.store.get('chat:history:' + payload['session_id'], {}).get('turns', [])
                 files = [self.service.documents.get(item.document_id) for item in state.attachments]
                 gmail = self.manager.gmail
@@ -90,19 +97,30 @@ class ConversationService:
                 limits = self.manager.settings.limits
                 limits = limits.model_copy(update={'max_model_calls': min(limits.max_model_calls, limits.max_chat_model_calls),
                                                   'max_chat_model_calls': min(limits.max_model_calls, limits.max_chat_model_calls)})
+                if snapshot.values:
+                    # A new greeting or changed profile cannot replace the
+                    # task that was in progress when execution stopped.
+                    inputs = snapshot.values.get('inputs', inputs)
+                    trace(self.manager.repository, run_id, 'chat_resume', next_steps=list(snapshot.next),
+                          saved_tools=len(snapshot.values.get('observations', [])))
                 async with self.manager.client_factory() as client:
                     context = ConversationContext(self, run_id,
                         ManagedModelClient(client, self.manager.repository, run_id, limits),
                         ManagedSearchTool(self.manager.search, self.manager.repository, run_id, limits) if self.manager.search else None,
                         ManagedBrowser(self.manager.browser, self.manager.repository, run_id, limits) if self.manager.browser else None,
                         inputs, limits)
-                    output = await self.graph.ainvoke({'observations': [], 'steps': 0, 'action': {}, 'result': {}},
-                        context=context, config={'recursion_limit': 2 * limits.max_chat_model_calls + 4})
+                    if snapshot.values and not snapshot.next and snapshot.values.get('result'):
+                        output = snapshot.values
+                    else:
+                        initial = None if snapshot.values else {'observations': [], 'steps': 0,
+                            'action': {}, 'result': {}, 'instruction': {}, 'inputs': inputs}
+                        output = await self.graph.ainvoke(initial, context=context,
+                                                         config=self.config(run_id), durability='sync')
                 cached = {**output['result'], 'session_id': payload['session_id']}
                 # Save the answer before outbox delivery. An explicit retry after
                 # a crash here reuses it, without a second model or Gmail call.
                 self.store.put('chat:result:' + run_id, cached)
-                trace(self.manager.repository, run_id, 'node_end', node='conversation')
+                self.store.put('resume:' + run_id, {'next_steps': [], 'completed_tools': len(output.get('observations', []))})
             check_cancelled(self.manager.repository, run_id)
             self._remember(run_id, payload, cached)
             entries = []
@@ -117,14 +135,27 @@ class ConversationService:
             state.current_step = 'cancelled'
             self.manager.repository.save_run(state, 'cancelled')
             return 'cancelled'
+        except RunStopped:
+            await self._save_progress(run_id)
+            state.current_step = 'stopped'
+            self.manager.repository.save_run(state, 'stopped')
+            trace(self.manager.repository, run_id, 'run_stopped')
+            return 'stopped'
         except BaseException as error:
             # Cancellation and crashes keep budgets and inputs for explicit retry.
+            await self._save_progress(run_id)
             state.current_step = 'failed'
             message = (error.public_message if isinstance(error, ModelProviderError)
                        else 'Conversation interrupted or unavailable. Retry this turn.')
             self.manager.repository.save_run(state, 'failed', message)
             raise
         return 'completed'
+
+    async def _save_progress(self, run_id):
+        """Keep a small readable pointer as well as LangGraph's full snapshot."""
+        snapshot = await self.graph.aget_state(self.config(run_id))
+        self.store.put('resume:' + run_id, {'next_steps': list(snapshot.next),
+            'completed_tools': len(snapshot.values.get('observations', [])) if snapshot.values else 0})
 
     def _remember(self, run_id, payload, result):
         key = 'chat:history:' + payload['session_id']
@@ -157,6 +188,12 @@ class ConversationService:
 
     async def read_tool(self, action, context, observations):
         """Dispatch a checked read operation; external content cannot add tools."""
+        from app.storage.repository import stable_id
+        cache_key = 'chat:tool:' + stable_id(context.run_id, json.dumps(action.model_dump(), sort_keys=True))
+        cached = self.store.get(cache_key)
+        if cached is not None:
+            trace(self.manager.repository, context.run_id, 'tool_cache_hit', tool=action.action, call_id=action.call_id)
+            return cached
         observation = {'tool': action.action, 'content': '', 'sources': []}
         started = time.monotonic()
         call_id = action.call_id or uuid4().hex
@@ -261,6 +298,9 @@ class ConversationService:
         trace(self.manager.repository, context.run_id, 'conversation_tool', tool=action.action, call_id=call_id,
               succeeded='error' not in observation, seconds=time.monotonic() - started,
               source_count=len(observation['sources']))
+        # Close the small window between completing a read and saving the next
+        # graph checkpoint. Retrying that node can reuse its recorded result.
+        self.store.put(cache_key, observation)
         return observation
 
     def response(self, action, observations, context):
@@ -328,4 +368,6 @@ class ConversationService:
         if self.store.get('chat:latest:' + session_id, {}).get('run_id') != turn_id:
             raise RunConflict('This proposal predates your latest message. Ask me to prepare the updated request.')
         # A proposal may start once, even if Telegram delivers the click twice.
-        return self.service.start(WorkflowRequest.model_validate(result['proposal']), 'chat:proposal:' + turn_id, 'telegram')
+        job = self.service.start(WorkflowRequest.model_validate(result['proposal']), 'chat:proposal:' + turn_id, 'telegram')
+        self.service.tasks.remember(session_id, job['run_id'])
+        return job

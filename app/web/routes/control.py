@@ -101,6 +101,15 @@ async def retry(request: Request, run_id: str, idempotency_key: Annotated[str | 
 async def cancel(request: Request, run_id: str): return service(request).cancel(run_id)
 
 
+@router.post('/runs/{run_id}/stop', status_code=202)
+async def stop(request: Request, run_id: str): return service(request).tasks.stop(run_id)
+
+
+@router.post('/runs/{run_id}/continue', status_code=202)
+async def continue_run(request: Request, run_id: str, idempotency_key: Annotated[str | None, Header()] = None):
+    return await service(request).tasks.continue_task('', request_key(idempotency_key), run_id)
+
+
 @router.put('/queue')
 async def queue(request: Request, body: QueueSetting):
     service(request).store.put('queue', body.model_dump()); return body

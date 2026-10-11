@@ -13,6 +13,7 @@ from app.domain.workflow import ApprovalDecision, ApprovalSubmission, WorkflowRe
 from app.agent.nodes.approval import validate_decisions
 from app.llm.client import ModelProviderError
 from app.services.limits import LimitExceeded
+from app.services.cancellation import RunStopped
 from app.services.runs import RunConflict, RunNotFound
 from app.storage.control import ControlStore, JobRow, RunMeta, now
 from app.storage.models import RunRow, TraceRow, ActionRow
@@ -23,6 +24,8 @@ class AgentService:
     def __init__(self, manager):
         self.manager = manager
         self.store = ControlStore(manager.repository.engine)
+        from app.services.tasks import TaskControls
+        self.tasks = TaskControls(self)
         from app.services.documents import DocumentService
         self.documents = DocumentService(manager.repository.engine, manager.settings)
         from app.services.conversation import ConversationService
@@ -101,11 +104,18 @@ class AgentService:
         if existing: return existing
         row = self.manager.repository.run(run_id)
         if row is None: raise RunNotFound("Unknown run.")
-        if row["status"] != "failed": raise RunConflict("Only failed or interrupted runs can be retried.")
+        if row["status"] not in {'failed', 'stopped'}: raise RunConflict("Only failed, interrupted, or stopped runs can be retried.")
         if self.store.cancellation_requested(run_id): raise RunConflict("Cancelled runs cannot be retried.")
         if (self.store.metadata(run_id) or {}).get('kind') == 'chat':
-            return self.store.enqueue('chat', run_id, self.conversations.retry_payload(run_id), key)
-        return self.store.enqueue("retry", run_id, {}, key)
+            payload = self.conversations.retry_payload(run_id)
+            job = self.store.enqueue('chat', run_id, payload, key)
+            # Explicitly returning to this task makes its eventual proposal
+            # current again. A later new message will invalidate it as usual.
+            self.store.put('chat:latest:' + payload['session_id'], {'run_id': run_id})
+        else:
+            job = self.store.enqueue("retry", run_id, {}, key)
+        self.store.delete('stop:' + run_id)
+        return job
 
     def cancel(self, run_id):
         response = self.state(run_id)
@@ -179,6 +189,8 @@ class AgentService:
             if kind == 'chat':
                 status = await self.conversations.execute(job)
                 self.store.finish_job(job['id'], status)
+                if status == 'stopped':
+                    self._notify(job['id'], f'Task stopped and progress saved. Say continue or /continue {run_id}.')
                 return True
             if kind == "start": result = await self.manager.execute_new(run_id)
             elif kind == "decisions": result = await self.manager.resume(run_id, ApprovalSubmission.model_validate(job["payload"]))
@@ -192,7 +204,7 @@ class AgentService:
                 self.store.put("reply_check", {"processed": count, "checked_at": now()})
                 result = None
             else: raise ValueError("Unknown job type.")
-            status = "cancelled" if result and result.state.current_step == "cancelled" else "completed"
+            status = result.state.current_step if result and result.state.current_step in {'cancelled', 'stopped'} else 'completed'
             self.store.finish_job(job["id"], status)
             if kind == 'document':
                 message = f"File ready: {document['filename']} ({len(document['content']['pages'])} pages/sections). Ask me a question about it, or inspect the text in the dashboard."
@@ -206,6 +218,12 @@ class AgentService:
                         "\n\nReview and edit them in Gmail → Drafts, then click Send yourself. Nothing has been sent."
                         f"\nhttps://mail.google.com/mail/#drafts\nRun: {run_id}")
             self._notify(job["id"], message)
+        except RunStopped:
+            state = self.state(job['run_id']).state
+            state.current_step = 'stopped'
+            self.manager.repository.save_run(state, 'stopped')
+            self.store.finish_job(job['id'], 'stopped')
+            self._notify(job['id'], f'Task stopped. Say continue or /continue {job["run_id"]}.')
         except asyncio.CancelledError:
             self.store.finish_job(job["id"], "interrupted", "Service stopped; inspect and retry.")
             raise
@@ -257,6 +275,7 @@ class AgentService:
             rows = session.scalars(select(TraceRow).where(TraceRow.run_id == run_id).order_by(TraceRow.timestamp.desc(), TraceRow.id).offset((event_page-1)*50).limit(50))
             events = [{"timestamp": r.timestamp, "event": r.event, **r.payload} for r in rows]
         return {**response.model_dump(mode="json"), "status": record["status"], "metadata": self.store.metadata(run_id),
+                "saved_progress": self.store.get('resume:' + run_id, {}),
                 "current_step": self.current_step(run_id, response.state.current_step, record['status']),
                 "usage": {k: record[k] for k in ("model_calls", "search_calls", "estimated_cost")},
                 "attached_documents": [{k:v for k,v in self.documents.get(item.document_id).items() if k != 'content'} for item in response.state.attachments],
@@ -266,7 +285,7 @@ class AgentService:
         with Session(self.store.engine) as session:
             job_counts = dict(session.execute(select(JobRow.status, func.count()).group_by(JobRow.status)).all())
             rows = list(session.execute(select(RunRow, RunMeta).join(RunMeta, RunMeta.run_id == RunRow.id)))
-            stats = {"runs": 0, "queued": 0, "running": 0, "paused": 0, "completed": 0, "failed": 0, "cancelled": 0,
+            stats = {"runs": 0, "queued": 0, "running": 0, "paused": 0, "stopped": 0, "completed": 0, "failed": 0, "cancelled": 0,
                      "prospects": 0, "qualified": 0, "pending_approvals": 0, "drafts": 0, "sent": 0, "replies": 0,
                      "model_calls": 0, "search_calls": 0, "browser_pages": 0, "estimated_cost": 0.0, "tokens": 0}
             for row, meta in rows:

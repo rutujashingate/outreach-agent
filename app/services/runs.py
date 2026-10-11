@@ -17,12 +17,13 @@ from app.domain.workflow import ApprovalSubmission, RunResponse, WorkflowRequest
 from app.storage.events import events, trace
 from app.agent.context import ManagedModelClient, ManagedSearchTool, WorkflowContext
 from app.storage.checkpoints import checkpoint_serializer
+from app.storage.control import ControlStore
 from app.agent.graph import build_full_graph
 from app.agent.nodes.approval import validate_decisions
 from app.settings import Settings
 from app.connectors.gmail.client import GmailTool
 from app.connectors.search import SearchTool
-from app.services.cancellation import RunCancelled, check_cancelled
+from app.services.cancellation import RunCancelled, RunStopped, check_cancelled
 
 
 class ConfigurationError(RuntimeError):
@@ -208,25 +209,41 @@ class RunManager:
                 state = WorkflowState.model_validate(snapshot.values)
                 validate_decisions(state, submission)
             if retry:
-                if previous["status"] != "failed":
-                    raise RunConflict("Only a failed execution can be retried.")
+                if previous["status"] not in {'failed', 'stopped'}:
+                    raise RunConflict("Only a failed or stopped execution can be retried.")
                 snapshot = await self.graph.aget_state(self.config(run_id))
                 if not snapshot.values:
                     input_value = state
+                elif any(task.interrupts for task in snapshot.tasks):
+                    raise RunConflict('This run needs a recipient or review decision. Use continue to see the pending action.')
                 elif not snapshot.next:
-                    raise RunConflict("There is no resumable failed checkpoint.")
+                    # A crash after the final checkpoint needs only to save
+                    # the result, never to repeat research or a Gmail action.
+                    result = WorkflowState.model_validate(snapshot.values)
+                    self.repository.save_run(result, 'completed')
+                    ControlStore(self.repository.engine).put('resume:' + run_id, {'next_steps': []})
+                    return RunResponse(state=result, awaiting_approval=False)
             self.repository.save_run(state, "running")
             trace(self.repository, run_id, "resume" if submission is not None else "retry" if retry else "run_start")
             try:
                 async with self.context(run_id) as context:
-                    await self.graph.ainvoke(input_value, self.config(run_id), context=context)
+                    await self.graph.ainvoke(input_value, self.config(run_id), context=context, durability='sync')
                 snapshot = await self.graph.aget_state(self.config(run_id))
                 result = WorkflowState.model_validate(snapshot.values)
                 paused = any(task.interrupts for task in snapshot.tasks)
+                ControlStore(self.repository.engine).put('resume:' + run_id, {'next_steps': list(snapshot.next)})
                 self.repository.save_run(result, "paused" if paused else "completed")
                 trace(self.repository, run_id, "run_paused" if paused else "run_end", current_step=result.current_step)
                 return RunResponse(state=result, awaiting_approval=paused and result.current_step == "awaiting_approval",
                                    awaiting_recipients=paused and result.current_step == "awaiting_recipients")
+            except RunStopped:
+                snapshot = await self.graph.aget_state(self.config(run_id))
+                result = WorkflowState.model_validate(snapshot.values) if snapshot.values else state
+                ControlStore(self.repository.engine).put('resume:' + run_id, {'next_steps': list(snapshot.next)})
+                result.current_step = 'stopped'
+                self.repository.save_run(result, 'stopped')
+                trace(self.repository, run_id, 'run_stopped', next_steps=list(snapshot.next))
+                return RunResponse(state=result, awaiting_approval=False)
             except RunCancelled:
                 snapshot = await self.graph.aget_state(self.config(run_id))
                 result = WorkflowState.model_validate(snapshot.values) if snapshot.values else state
@@ -236,6 +253,7 @@ class RunManager:
                 return RunResponse(state=result, awaiting_approval=False)
             except (Exception, CancelledError) as error:
                 snapshot = await self.graph.aget_state(self.config(run_id))
+                ControlStore(self.repository.engine).put('resume:' + run_id, {'next_steps': list(snapshot.next)})
                 result = WorkflowState.model_validate(snapshot.values) if snapshot.values else state
                 result.current_step = "failed"
                 self.repository.save_run(result, "failed", "Workflow execution failed; inspect execution events.")

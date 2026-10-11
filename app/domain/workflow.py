@@ -203,7 +203,7 @@ class WorkflowState(OutreachState):
     current_step: Literal[
         "initialized", "skeleton_ready", "research_complete", "interpreted",
         "qualified", "no_matches", "contact_checked", "written", "reviewed",
-        "awaiting_approval", "awaiting_recipients", "cancelled", "completed", "failed",
+        "awaiting_approval", "awaiting_recipients", "cancelled", "stopped", "completed", "failed",
     ] = "initialized"
 
 

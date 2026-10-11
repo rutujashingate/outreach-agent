@@ -140,6 +140,8 @@ class TelegramBot:
                     await self._attachment(message, conversation)
                 elif not text:
                     self.say('Please send text or use the buttons.')
+                elif await self._task_command(text, conversation):
+                    pass
                 elif text.startswith('/'):
                     self._command(text, conversation)
                 else:
@@ -152,6 +154,35 @@ class TelegramBot:
         except Exception:
             self.say('That request could not be processed. Check the dashboard and try again.')
         self.store.finish_update(item['update_id'], conversation)
+        return True
+
+    async def _task_command(self, text, conversation):
+        """Common stop/continue phrases act on saved work without a model call."""
+        import re
+        command, _, identifier = text.partition(' ')
+        command = command.split('@')[0].lower()
+        aliases = {'/continue': 'continue', '/resume': 'continue', '/stop': 'stop', '/pause': 'stop'}
+        action = aliases.get(command)
+        if action is None:
+            if conversation.get('mode') == 'guided':
+                return False  # Do not reinterpret an answer to guided setup.
+            normalized = ' '.join(text.casefold().strip(' .!?').split())
+            if normalized in {'continue where you stopped', 'continue from where you stopped', 'keep going'}:
+                action = 'continue'
+            else:
+                match = re.fullmatch(r'(?:please )?(continue|resume|stop|pause)(?: (?:the |my )?(?:task|work))?(?: please)?', normalized)
+                if not match:
+                    return False
+                action = 'continue' if match[1] in {'continue', 'resume'} else 'stop'
+            identifier = ''
+        identifier = identifier.strip() or conversation.get('run_id', '')
+        session_id = conversation.get('id', '')
+        if action == 'continue':
+            result = await self.service.tasks.continue_task(session_id, f'tg:{self.message_key}:continue', identifier)
+        else:
+            run_id, _ = self.service.tasks.select(session_id, identifier)
+            result = self.service.tasks.stop(run_id)
+        self.say(result['message'])
         return True
 
     async def _attachment(self, message, conversation):
@@ -193,7 +224,7 @@ class TelegramBot:
             if command == '/start':
                 self._chat_conversation(conversation)
                 conversation['stage'] = 'chat'
-            self.say('Hi! Just send me a message. Ask a question, share a website, or upload a file and tell me what you need. I remember recent messages, so you can ask follow-up questions. No /new is needed.\n\nOptional controls:\n/new — clear the conversation and start fresh\n/chat — leave guided questions and talk normally\n/guided — step-by-step outreach setup\n/runs — recent outreach runs\n/review RUN_ID — review drafts\n/recipients RUN_ID — choose addresses\n/status RUN_ID — progress\n/retry RUN_ID — retry failed work\n/cancel RUN_ID — stop a run\n/replies — check tracked replies\n/account — Gmail status\n/files — attached files\n/clearfiles — detach files\n/retryfile FILE_ID — retry reading\n\nI prepare emails only when you request them and start the proposal. Requested Gmail drafts are saved for you to review and send manually in Gmail. Use the dashboard for connector setup and logs.')
+            self.say('Hi! Just send me a message. Ask a question, share a website, or upload a file and tell me what you need. I remember recent messages, so you can ask follow-up questions. No /new is needed.\n\nOptional controls:\n/new — clear the conversation and start fresh\n/chat — leave guided questions and talk normally\n/guided — step-by-step outreach setup\n/runs — recent outreach runs\n/review RUN_ID — review drafts\n/recipients RUN_ID — choose addresses\n/status RUN_ID — progress\n/continue [RUN_ID] — resume saved work (or say continue)\n/stop [RUN_ID] — stop and save progress (or say stop)\n/retry RUN_ID — retry failed work\n/cancel RUN_ID — stop a run\n/replies — check tracked replies\n/account — Gmail status\n/files — attached files\n/clearfiles — detach files\n/retryfile FILE_ID — retry reading\n\nI prepare emails only when you request them and start the proposal. Requested Gmail drafts are saved for you to review and send manually in Gmail. Use the dashboard for connector setup and logs.')
         elif command == '/new':
             conversation.clear(); self._chat_conversation(conversation)
             self.say('New conversation. What would you like to talk about or work on?')
@@ -317,7 +348,12 @@ class TelegramBot:
             self.say(f'Goal: {request.goal}\nFrom: {request.sender.name} <{request.sender.email or "not configured"}>\nSearch: {request.use_search}\nBrowser: {request.use_browser}\nAttached files: {len(request.attachments)}\nDraft destination: {request.gmail_action}\nYou review and send Gmail drafts yourself. Start this run?', self._wizard_buttons(conversation, [('Start run', 'confirm')]))
         elif stage == 'confirm' and value == 'confirm':
             job = self.service.start(WorkflowRequest.model_validate(conversation['request']), f'tg:{self.message_key}:start', 'telegram')
-            self.say(f'Run queued: {job["run_id"]}. I will notify you when it needs a decision.'); conversation.clear()
+            session_id = conversation['id']
+            self.service.tasks.remember(session_id, job['run_id'])
+            self.say(f'Run queued: {job["run_id"]}. I will notify you when it needs a decision.')
+            attachments = conversation['request'].get('attachments', [])
+            conversation.clear()
+            conversation.update(mode='chat', stage='chat', id=session_id, request={'attachments': attachments})
         else: raise RunConflict('This conversation has advanced. Use the latest buttons.')
 
     async def deliver_one(self):
