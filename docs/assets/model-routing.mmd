@@ -1,0 +1,31 @@
+---
+config:
+  theme: base
+  fontFamily: Arial
+  themeVariables:
+    fontSize: 19px
+    primaryColor: '#eef8f6'
+    primaryBorderColor: '#78aaa0'
+    primaryTextColor: '#163b36'
+    lineColor: '#657d78'
+    edgeLabelBackground: '#ffffff'
+  flowchart:
+    htmlLabels: false
+    curve: linear
+    nodeSpacing: 35
+    rankSpacing: 45
+    padding: 18
+---
+flowchart LR
+    accTitle: Three model roles with application-controlled tools
+    accDescr: The application routes instruction following and writing to Grok 4.3, reasoning and tool selection to Grok 4.20, and analysis of collected evidence to Grok 4.20 Multi-Agent. Python validates tool requests before execution. Multi-Agent receives evidence, without direct access to connectors.
+    routing["Task router"] --> instruction["Grok 4.3<br/>Understand + write"]
+    routing --> reason["Grok 4.20<br/>Reason + review"]
+    routing --> research["4.20 Multi-Agent<br/>Analyze evidence"]
+    reason -->|Tool request| tools["Python checks + runs tools"]
+    tools -. Results .-> reason
+    tools -. Collected evidence .-> research
+    classDef model fill:#edf3fc,stroke:#8da6c7,color:#243b58;
+    classDef tools fill:#fff6e6,stroke:#caa65d,color:#5b451b;
+    class instruction,reason,research model;
+    class tools tools;

@@ -2,9 +2,8 @@
 config:
   theme: base
   fontFamily: Arial
-  themeCSS: 'text, tspan { font-family: Arial, Helvetica, sans-serif !important; }'
   themeVariables:
-    fontSize: 15px
+    fontSize: 19px
     primaryColor: '#eef8f6'
     primaryBorderColor: '#78aaa0'
     primaryTextColor: '#163b36'
@@ -13,63 +12,23 @@ config:
   flowchart:
     htmlLabels: false
     curve: linear
-    nodeSpacing: 25
-    rankSpacing: 16
-    padding: 10
-    wrappingWidth: 380
+    nodeSpacing: 26
+    rankSpacing: 35
+    padding: 18
 ---
-flowchart TD
-    accTitle: Research, requested drafts, and approved existing-draft edits
-    accDescr: Telegram messages enter a saved queue. LangGraph answers questions and uses reading tools. Explicit email requests start drafting directly; a confirmation button is used only when the owner asks to wait. Known recipients go directly to writing preparation without prospect discovery or fit scoring. Finding new contacts follows research, qualification and address selection. Both paths retain relationship checks, writing, review and duplicate protection. Existing Gmail drafts are read, revised and reviewed, then updated at the same ID only after explicit owner approval. New website discovery uses keyless public search or optional Brave. The owner sends in Gmail. SQLite or one Supabase PostgreSQL database holds saved state.
-    telegram["Private Telegram<br/>Normal messages, files and decisions"] --> service["Shared service<br/>Saved queue and one worker"]
-    dashboard["Owner dashboard<br/>Connections and controls"] --> service
-    service --> chat["LANGGRAPH CONVERSATION<br/>4.3 instructions · 4.20 reasoning/tools<br/>Saved request + step + collected evidence"]
-    chat -->|Read evidence| tools["Bounded read-only tools<br/>Files · browser · web / saved search · Gmail reads<br/>Multi-Agent evidence analysis when needed"]
-    tools --> chat
-    chat -->|Answer or clarify| answer["Reply in Telegram<br/>Continue the conversation"]
-    chat -->|Edit a saved email| readDraft["Read current Gmail draft<br/>Resolve matching subjects · preserve original"]
-    readDraft --> editDraft["4.3 writes the complete revision<br/>4.20 reviews · show proposed content"]
-    editDraft --> editApproval{"Owner approves changes?"}
-    editApproval -->|Reject| noChange["Leave Gmail unchanged"]
-    editApproval -->|Approve in Telegram or dashboard| updateDraft["Check account + original content + action history<br/>Update THE SAME draft · preserve recipients / attachments"]
-    updateDraft --> outcome
-    chat -->|Email drafts requested| requested["Validate the owner's writing request"]
-    requested -->|Start directly| kind{"Known recipient<br/>or find new contacts?"}
-    requested -->|Only if owner asks to wait| proposal["Show proposal + wait for confirmation"]
-    proposal -->|Owner confirms| kind
-    kind -->|Known recipient| direct["Use the owner's writing request<br/>Read supplied files when needed"]
-    kind -->|Find contacts| files["Optional uploaded files<br/>Read text / local OCR · save cited evidence"]
-    service -->|Dashboard or guided outreach| files
-    files --> goal["LANGGRAPH<br/>Interpret the goal"]
-    goal --> research["Research prospects + sources<br/>Files · notes · keyless search / Brave · public browser<br/>4.20 Multi-Agent evidence analysis"]
-    research --> qualification{"Qualified prospects?"}
-    qualification -->|Yes| recipients["Resolve recipient addresses<br/>Published evidence or owner selection"]
-    qualification -->|No| outcome["Save outcomes + relationship history"]
-    recipients --> memory["Retrieve memory + Gmail history<br/>Apply contact rules"]
-    direct --> memory
-    memory -->|Allowed| strategy["Use direct writing brief or outreach strategy<br/>Write the requested email"]
-    memory -->|Blocked| outcome
-    strategy --> review{"Review passes?"}
-    review -->|Pass| destination{"Draft destination"}
-    review -->|Revise within limit| strategy
-    review -->|Limit exhausted| outcome
-    destination -->|App only| approval["Review in app<br/>Edit, approve or reject"]
-    approval -->|Edit| review
-    approval -->|Record decision| outcome
-    destination -->|Gmail requested| action["Recheck account, contact rules + duplicates<br/>Save Gmail draft · record confirmed result"]
-    action --> outcome
-    action --> notify["Notify owner: drafts are ready"]
-    notify --> manual["YOU, IN GMAIL<br/>Review → edit → click Send"]
-    store[("SQLite OR Supabase PostgreSQL<br/>Jobs, conversation, checkpoints and choices<br/>File text, events and action ledger")]
-    tools -->|Save file / website evidence| index["Local embedding model<br/>Split passages · preserve sources"]
-    index --> knowledge[("Saved knowledge<br/>Supabase pgvector + keyword indexes")]
-    knowledge -. Relevant cited passages .-> tools
-    originals[("Private originals<br/>Local files OR Supabase Storage")]
-    originals -. Text extraction and OCR .-> files
-    service -. Stop and continue same task .-> store
-    approval -. Saved pause .-> store
-    outcome -. Persist .-> store
-    classDef decision fill:#fff6e6,stroke:#caa65d,color:#5b451b;
-    classDef storage fill:#edf3fc,stroke:#8da6c7,color:#243b58;
-    class qualification,review,destination,editApproval decision;
-    class store,outcome,knowledge,originals storage;
+flowchart LR
+    accTitle: Outreach Agent at a glance
+    accDescr: Telegram and the owner dashboard share one LangGraph agent and saved queue. Questions, files and web research return sourced answers. Explicit email requests prepare Gmail drafts. Progress is saved in SQLite or PostgreSQL.
+    telegram["Telegram"] --> agent["LangGraph agent"]
+    dashboard["Dashboard"] --> agent
+    agent --> research["Research + files"]
+    research --> answer["Answer + sources"]
+    agent --> email["Requested emails"]
+    email --> gmail["Gmail drafts"]
+    agent -. Save progress .-> state[("Saved state")]
+    classDef interface fill:#edf3fc,stroke:#8da6c7,color:#243b58;
+    classDef result fill:#eef8f6,stroke:#78aaa0,color:#163b36;
+    classDef storage fill:#f4f1fb,stroke:#ada0c7,color:#4c3b67;
+    class telegram,dashboard interface;
+    class answer,gmail result;
+    class state storage;

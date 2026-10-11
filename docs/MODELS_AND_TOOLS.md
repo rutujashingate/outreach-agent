@@ -1,84 +1,59 @@
-# Models and tool calls
+# Models and tools
 
-With xAI selected, the app uses one API key and three roles. A role is simply a job assigned to a model. The app chooses the role; the model cannot change its own permissions or spending limits.
+One xAI key serves three roles. Python selects the model, validates tool requests, and enforces limits.
 
-| Role | Default model | Work |
-|---|---|---|
-| Instruction following | `grok-4.3` | Understand the message, interpret outreach goals, write emails. A greeting can finish here. |
-| Reasoning | `grok-4.20-0309-reasoning` | Select conversation tools, answer from their results, qualify prospects, plan strategy, review drafts, interpret relationship history. |
-| Research | `grok-4.20-multi-agent-0309` | Analyze collected evidence and turn research material into sourced prospects. Uses `low`, the four-agent setting. |
+![The task router assigns writing, reasoning, and evidence analysis to three model roles](assets/model-routing.svg)
 
-```mermaid
-flowchart TD
-    message[Your message] --> instruction[Grok 4.3: understand instructions]
-    instruction -->|Simple answer| reply[Telegram reply]
-    instruction -->|Evidence needed| reasoning[Grok 4.20: select a tool]
-    reasoning --> read[Python checks and runs search, browser, file or status tool]
-    read --> reasoning
-    reasoning -->|Analyze collected evidence| research[Multi-agent: research analysis]
-    research --> reasoning
-    reasoning --> reply
-```
+## Model settings
 
-`search` discovers pages through DuckDuckGo without a key, or Brave when its key is configured. The keyless provider may be rate-limited; a failure is reported rather than replaced with invented results. `read_page` uses the protected public browser. `read_file` reads an attached document's extracted text. `run_status` reads outreach progress. `read_gmail_draft` reads an existing draft by its recipient, subject, or latest tracked draft. `research` asks the multi-agent model to analyze evidence those tools already collected; it does not search by itself.
-
-The latest user message is a separate conversation turn, after saved history. A clear new work request reaches the reasoner even when the instruction model mistakenly answers an older email question. The first call for a fresh research command must search or read its supplied URL; an existing-email edit must first read Gmail. Only that required tool is advertised for this first call. Later calls can select other available tools. Simple greetings still use the instruction model alone.
-
-The reasoning model returns a native **function call**: a tool name, arguments, and a call identifier. Python checks the name and arguments, then applies file-access rules, public-network restrictions, cancellation, and budgets. The result is returned as `function_call_output` with that same identifier. Unknown tools, unexpected fields, multiple simultaneous calls, and tools requested after the limit are rejected. Credentials are never tool arguments. Neither sending email nor approving a draft is a conversation tool.
-
-The multi-agent model has no access to our custom functions. Its provider-hosted search and other paid tools are deliberately not enabled: gathering evidence remains inside our existing search/page limits. An analysis is labeled as an analysis, not a quotation from a website. Sources must match collected references, although matching references alone cannot prove every claim is true. Final draft creation stays in the explicit outreach workflow.
-
-## Existing Gmail draft edits
-
-“Edit the latest email draft and add a short introduction” reads the saved message, then uses 4.3 to write the complete revision and 4.20 to review it. The full proposed content appears in Telegram and **Run details → Proposed Gmail draft changes**, with before/after content in the dashboard. It waits for **Approve changes** or **Reject changes**. A chat reply such as “continue” cannot approve it.
-
-Approval identifies the specific edit request, connected account, draft ID, original content, proposed subject/body, version, and update action. The worker reads Gmail again before updating; a changed draft blocks the old proposal. The update uses the same draft ID and keeps its To/CC/BCC, attachments, reply headers, and thread. An update does not increase the count of newly created drafts. A lost Gmail confirmation blocks replay until inspection. HTML-only drafts, bodies over 50,000 characters, and raw messages over the read limit require editing in Gmail.
-
-The email body schema allows complete multiline text. xAI matches string patterns against the entire value, so the former `\S` pattern constrained output to one non-space character. The replacement explicitly allows surrounding text. Writing, review, and Gmail creation also reject single-character bodies and obvious placeholders. Automated review checks that the complete message fulfills the owner's instructions; human approval remains separate.
-
-## Settings
-
-Add these non-secret settings to your existing `.env`. Keep your existing `XAI_API_KEY` there, once. Restart the service after changes.
+These defaults belong in `.env`, alongside your private `XAI_API_KEY`:
 
 ```dotenv
 OUTREACH_MODEL_PROVIDER=xai
-XAI_TASK_ROUTING=true
 XAI_INSTRUCTION_MODEL=grok-4.3
 XAI_REASONING_MODEL=grok-4.20-0309-reasoning
 XAI_RESEARCH_MODEL=grok-4.20-multi-agent-0309
-XAI_REASONING_EFFORT=none
 ```
 
-The effort setting applies to 4.3 only. The reasoning model uses its own reasoning behavior; multi-agent uses `low`. `XAI_MODEL` remains an older fallback for the instruction model. `XAI_TASK_ROUTING=false` restores the previous single-model xAI adapter for troubleshooting. Groq, OpenAI, and the offline demo retain their existing interfaces.
+4.3 understands requests and writes emails. 4.20 selects tools, qualifies contacts, plans strategy, and reviews drafts. Multi-Agent analyzes collected evidence; it has no direct connector access. Greetings can finish with 4.3 alone.
 
-Connections shows the configured roles. Saved `model_start`, `model_end`, and `model_failure` events show the task, role, model, and available usage. `tool_start`, `conversation_tool`, and `tool_failure` connect each local tool attempt to its result using a call ID. Logs omit full prompts and credentials. The usual model/search/page budgets apply and do not increase on retry. The reserved dollar amount remains an estimate, not the provider's bill or an exact cap on its charges; the provider's billing limit is separate. More agents can consume more tokens even in a single request.
+## Available tools
 
-## Verification
+A **tool call** asks Python to perform a specific operation and return its result.
 
-`tests/test_model_routing.py` uses fake HTTP responses through the real graph. It checks all three role selections, native call/result pairs, researched citations, model usage events, and rejected tool requests. `tests/test_research_routing.py` checks a new research task overriding stale email context, required tools, complete email bodies, rejected fragments, explicit retry, and keyless discovery. `tests/test_gmail_draft_edits.py` checks native routing for draft reads/writing/review, shared approvals, preserved message parts, restart recovery, and concurrent PostgreSQL decisions. `tests/test_xai_client.py` retains single-model compatibility and provider-error checks. No real API calls are needed.
+| Tool | What it does |
+|---|---|
+| `search` | Finds public pages with keyless DuckDuckGo, or Brave when configured. |
+| `read_page` | Reads an allowed public website in the browser. |
+| `read_file` | Reads text extracted from an attached file. |
+| `search_saved` | Finds relevant passages in the enabled saved-knowledge library. |
+| `read_gmail_draft` | Reads an existing Gmail draft; several matches require your selection. |
+| `run_status` | Reads saved progress, drafts, and outcomes. |
+| `research` | Asks Multi-Agent to analyze evidence already collected. |
 
-These routes are owner-selected, not a claim that comparative quality evaluations proved them optimal. A live test still needs account credits and permission for all three models. The old optional measurement-based router remains available to evaluation code.
+The latest message defines the task. Fresh research must first search or read its supplied URL; an existing-draft edit must first read Gmail. The reasoner returns a native function call with a name, arguments, and call ID. Python checks it and returns the result under that same ID. Unknown tools and excess calls are rejected.
 
-Provider references: [structured output and whole-string patterns](https://docs.x.ai/developers/model-capabilities/text/structured-outputs), [Gmail draft lifecycle](https://developers.google.com/workspace/gmail/api/guides/drafts), [keyless search library](https://github.com/deedy5/ddgs), [function calling](https://docs.x.ai/developers/tools/function-calling), [multi-agent restrictions and agent counts](https://docs.x.ai/developers/model-capabilities/text/multi-agent), [4.3](https://docs.x.ai/developers/models/grok-4.3), [4.20 reasoning](https://docs.x.ai/developers/models/grok-4.20-0309-reasoning).
+Website and file content stays evidence. It cannot authorize an email action. Provider-hosted search tools are disabled; research uses the app's bounded connectors. Public search can be rate-limited. Search snippets do not prove a full page was read.
 
-## Saved work and continuation
+## Email actions
 
-Both chat and outreach save LangGraph checkpoints. Chat stores its original inputs, instruction pass, selected action, tool observations, step count, and final answer. The server uses a separate `chat:RUN_ID` thread in the same checkpoint store, so its data cannot overwrite outreach state.
+![New email requests save reviewed drafts; existing-draft edits wait for approval before updating the same draft](assets/email-flow.svg)
 
-Say **stop**, then **continue**. The service finds the unfinished task in that conversation and resumes its saved next step. If the service was interrupted, restart it and say **continue**. Use `/continue RUN_ID` when more than one task is unfinished or you started a new conversation. A pending recipient choice or review requires that decision; ordinary continuation does not supply it. Permanent cancellation remains `/cancel RUN_ID`.
+Known recipients go directly to writing and review. Finding new contacts adds research, qualification, and address selection. Contact checks, account checks, and duplicate protection apply to both.
 
-Completed model responses are cached using their exact task, input, schema, and workflow revision. A cache is a saved result that can be reused. Search and browser results are also cached per run. This protects work completed inside a step that had not yet reached its next checkpoint. Intentional revisions still receive a new review, even if the revised email text happens to be identical. Failed requests are not cached, and usage reservations are never refunded or reset by continuation. A network call interrupted before its result was saved can be repeated; Gmail writes keep their separate duplicate/uncertainty protection.
+For an existing draft, inspect the preview in Telegram or the dashboard and choose **Approve changes** or **Reject changes**. Approval binds the request, account, draft ID, original message, and proposed content. Changed drafts or accounts block old previews. Recipients, attachments, and thread are preserved. HTML-only or oversized drafts require editing in Gmail. Sending stays manual.
 
-Task links, stop flags, and readable progress summaries use the database's service records. Supabase uses the same Postgres checkpoint adapter; otherwise storage stays local SQLite. The dashboard shows stop/continue controls, saved progress, and live storage validation. Storage checks make no Grok calls and do not replace quality evaluations of generated answers.
+## Saved work and validation
 
-Telegram shows a temporary status using only **Queued…**, **Researching…**, or **Typing…**, alongside the normal typing indicator. The status is removed when the result arrives. Timers, task IDs, internal step names, model reasoning, and source contents do not appear in these messages. Their delivery runs separately from the worker and final replies; a failed progress update or cleanup cannot repeat work. Database reads and event writes in the conversation/model path run in background threads so cloud latency does not freeze those indicators.
+| Need | Where to look |
+|---|---|
+| Stop and resume | Say **stop**, then **continue**; use `/continue RUN_ID` if several tasks are unfinished. |
+| Inspect tool/model activity | Dashboard → run details → events and usage. |
+| Inspect retrieved passages | Dashboard → **Saved knowledge**. |
+| Check persistence | **Connections → Storage validation**. |
 
-An ordinary email to a known recipient uses `draft_mode: "direct"`. It skips discovery, qualification, and generated sales strategy, then uses the existing writing and review models. A simple direct draft therefore needs two workflow model calls, excluding conversation interpretation, optional Gmail memory extraction, or revisions. Research outreach keeps its existing stages and model routes. Both paths retain saved state, budgets, opt-outs, account checks, and the persistent Gmail action ledger. Direct drafting does not enable sending.
+Saved progress includes the goal, completed steps, evidence, and pending decisions. Completed reads and model results can be reused after a restart; usage limits remain spent. **Continue** cannot approve an edit. An uncertain Gmail write requires inspection before another attempt.
 
-## Search saved knowledge
+Reported tokens and estimated cost appear in the dashboard. Estimates are application reservations, not the provider's invoice. Model credits and billing limits are controlled by the provider.
 
-When enabled, `search_saved(query)` is another validated read-only tool. It searches documents and browser-read pages saved in earlier conversations, using local text embeddings plus keyword ranking. Embeddings represent meaning as numbers; pgvector stores and compares them inside Supabase PostgreSQL. The default English model runs on the computer/server and needs no extra API key. Grok still interprets the question and writes the answer.
-
-Search returns at most five passages with source dates, file/page or URL references, and background/research roles. Results become saved tool observations and survive stop/continue. Personal background is excluded when forming prospect-research material. Website text is historical until refreshed; source text never becomes instructions or permission to create emails. A missing embedding model produces clearly labelled keyword-only matches.
-
-The dashboard's **Saved knowledge** view lets you inspect the actual retrieved text and reindex sources. [Setup and evaluation](SUPABASE.md) explain model download, private files, and measuring retrieval. Images are searched through OCR-extracted text.
+[Validation results](VALIDATION.md) · [Detailed implementation and phase history](IMPLEMENTATION_HISTORY.md#phase-49--reliable-tools-complete-emails-and-approved-gmail-edits) · [API reference](API_GUIDE.md)

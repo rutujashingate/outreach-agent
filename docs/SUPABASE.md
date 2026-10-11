@@ -93,4 +93,4 @@ Keep `.data/models` mounted on a future server to reuse the model cache. Keep da
 
 ## Requested emails
 
-File reading, saved search, and web research do not create emails. Explicitly request drafts, review the proposal, and press **Start outreach**. The default is up to five qualified prospects per run, subject to evidence and budget. Requested Gmail drafts are saved after automated review; you review, edit, and click **Send** manually in Gmail. The agent cannot send messages.
+File reading, saved search, and web research do not create emails. Explicitly request drafts to start preparation. Ask to see a plan first if you want it to wait. Existing-draft edits show a preview and require **Approve changes** before updating the same Gmail draft. The default is up to five qualified prospects per run, subject to evidence and budget. Requested Gmail drafts are saved after automated review; you review, edit, and click **Send** manually in Gmail. The agent cannot send messages.
