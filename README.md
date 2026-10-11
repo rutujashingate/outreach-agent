@@ -5,7 +5,7 @@
 
 A conversational Telegram assistant for questions, file reading, public-web research, and outreach. Talk normally and ask follow-up questions. When you request outreach, it prepares sourced prospects and reviewed emails. You approve the exact message before Gmail creates a draft or sends it.
 
-**Python 3.12+ · LangGraph · FastAPI · Groq/OpenAI · SQLite · Playwright · Telegram · Gmail**
+**Python 3.12+ · LangGraph · FastAPI · Grok (xAI)/Groq/OpenAI · SQLite · Playwright · Telegram · Gmail**
 
 ## What it does
 

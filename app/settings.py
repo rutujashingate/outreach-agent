@@ -11,8 +11,8 @@ from app.services.limits import Limits
 
 
 class Settings(BaseModel):
-    # Groq is the default; OpenAI remains an optional adapter.
-    model_provider: Literal["openai", "groq"] = "groq"
+    # Existing installs keep the Groq fallback; .env.example explicitly selects xAI.
+    model_provider: Literal["openai", "groq", "xai"] = "groq"
     data_dir: Path = Path(".data")
     database_url: str | None = None
     checkpoint_backend: Literal["memory", "sqlite", "postgres"] = "sqlite"

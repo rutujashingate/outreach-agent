@@ -19,14 +19,15 @@ The demo does not connect to a real Telegram bot. Automated tests run the comple
 
 ## 2. Configure your application
 
-If you do not have `.env` yet, copy `.env.example` to `.env`. If you already have it, add the missing settings without replacing existing values. Startup loads `.env` automatically; exported environment variables take precedence.
+If you do not have `.env` yet, copy `.env.example` to `.env`. If you already have it, add the missing settings without replacing existing values. Keep each setting once: a later blank entry can override your saved key. Startup loads `.env` automatically; exported environment variables take precedence.
 
 | Setting | What it is for |
 |---|---|
 | `OUTREACH_OWNER_PASSWORD` | A strong password you choose for the dashboard. Required for normal browser login. |
-| `GROQ_API_KEY` | Your key from [Groq Console](https://console.groq.com/keys). Used for interpretation, research reasoning, qualification, writing, and review. |
-| `OUTREACH_MODEL_PROVIDER=groq` | Selects Groq. `openai` is the optional alternative and uses `OPENAI_API_KEY` plus `OPENAI_MODEL`. |
-| `GROQ_MODEL` | A supported structured-output model. The template uses `openai/gpt-oss-120b` hosted by Groq; that name does not require an OpenAI account. See [Groq’s supported models](https://console.groq.com/docs/structured-outputs). |
+| `OUTREACH_MODEL_PROVIDER=xai` | Selects Grok on xAI for conversation and outreach. The template selects this explicitly; the app does not switch providers when a call fails. |
+| `XAI_API_KEY` | Your API key from [xAI Console](https://console.x.ai/). Paste it only into `.env`. An existing key works if its permissions and team's available API credits allow the request. |
+| `XAI_MODEL=grok-4.3` | The Grok model requested by the app. Giving your key access to all models does not make the app use all of them. |
+| `XAI_REASONING_EFFORT=none` | Starts without extra reasoning tokens. Grok 4.3 also supports `low`, `medium`, `high`, and `xhigh`; higher effort can increase usage. |
 | `OUTREACH_TELEGRAM_BOT_TOKEN` | Token for your bot, issued by Telegram’s BotFather. |
 | `OUTREACH_TELEGRAM_OWNER_ID` | Your numeric Telegram user ID. The bot accepts only this user in their private chat. |
 | `BRAVE_SEARCH_API_KEY` | Optional [Brave Search API](https://brave.com/search/api/) key. Finds relevant pages. Omit it when supplying URLs or notes yourself. |
@@ -39,9 +40,15 @@ If you do not have `.env` yet, copy `.env.example` to `.env`. If you already hav
 
 Do not put secrets in Telegram messages, goals, Git commits, or screenshots. A connection shown as “configured” only means settings are present; the provider verifies them when called.
 
+The xAI adapter uses [Responses](https://docs.x.ai/developers/rest-api-reference/inference/responses) with structured JSON output, `store=false`, and the app's output-token limit (4,000 by default). Website research still uses the local browser and optional Brave connector; xAI-hosted search tools are not enabled. The output limit covers visible output, not extra reasoning, which is why the starting reasoning choice is explicit. See [Grok 4.3 settings](https://docs.x.ai/developers/models/grok-4.3).
+
+Other installed adapters remain optional. To select **Groq**, set `OUTREACH_MODEL_PROVIDER=groq`, `GROQ_API_KEY`, and `GROQ_MODEL` (default `openai/gpt-oss-120b`). This model runs on Groq and does not require an OpenAI account. To select **OpenAI**, set `OUTREACH_MODEL_PROVIDER=openai`, `OPENAI_API_KEY`, and `OPENAI_MODEL`. Only the selected provider's key is used. If `OUTREACH_MODEL_PROVIDER` is absent, the older Groq default remains for existing installations.
+
 If Groq reports that the model is blocked by your organization, open [Settings → Organization → Limits](https://console.groq.com/settings/limits), allow the model named in `GROQ_MODEL`, and save. A project-level block is controlled under Settings → Projects → Limits. A new key in the same organization does not bypass those permissions. This error does not mean you have reached the application's budget or need to buy credits. See [Groq's model permissions](https://console.groq.com/docs/model-permissions).
 
-Model failures now include a safe explanation in Telegram and saved job details. Invalid keys, blocked models, and rate limits stop immediately; temporary server/connection failures receive at most one automatic retry. Correct the setting or wait for the provider's limit to reset before explicitly retrying. Restart the application after changing `.env`.
+Model failures include a safe explanation in Telegram and saved job details. Invalid keys, blocked access, missing credits, and rate limits stop immediately; temporary server/connection failures receive at most one automatic retry. For xAI access failures, inspect the key's model/endpoint permissions and the team's API credits and spending limit. Correct the setting or wait for the provider's limit to reset before explicitly retrying. Restart the application after changing `.env`.
+
+To test a changed model key, stop the old process with **Ctrl+C**, activate `.venv`, and run `python -m app.main`. Open **http://127.0.0.1:8000**, sign in with your owner password, and check **Connections → Model**. Send **Hi** to your Telegram bot. This makes a real model call using your selected provider; `/new` is unnecessary. A successful reply verifies the live connection. If it fails, inspect the saved job's explanation before retrying.
 
 Generate the encryption key once:
 
@@ -216,7 +223,7 @@ OUTREACH_LIMITS_JSON={"max_estimated_cost_per_run":0.50,"max_model_calls":10}
 
 A run needing more calls stops at the cap. Changing limits requires restarting. Search/browser usage counts are shown separately; their costs are not included in the model estimate. Reported token counts appear when the provider returns them.
 
-Actual billing is managed with the provider. Groq offers a Free tier; upgrading to its paid Developer tier requires adding a payment method. Paid charges depend on token usage. Check Usage and Settings → Billing in Groq Console, as explained in [Groq's billing guide](https://console.groq.com/docs/billing-faqs). The outreach application does not collect payments.
+Actual billing is managed with the selected provider. For xAI, API credits and billing are separate from a Grok app subscription; key access to “all models” is not a free-usage allowance. Manage your balance, auto top-up, and spending limits in [xAI Console billing](https://docs.x.ai/console/billing). Key request/token rate limits control throughput, not a total dollar allowance. Groq users can instead consult [Groq's billing guide](https://console.groq.com/docs/billing-faqs). The outreach application does not collect payments.
 
 ## 6. Validate locally
 

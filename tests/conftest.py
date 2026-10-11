@@ -26,7 +26,7 @@ def isolated_application_settings(monkeypatch, tmp_path):
     """Tests use their own settings and data, even after you configure a real account."""
     import os
     for key in tuple(os.environ):
-        if key.startswith(("OUTREACH_", "OPENAI_", "GROQ_")) or key in {"GMAIL_ACCESS_TOKEN", "BRAVE_SEARCH_API_KEY"}:
+        if key.startswith(("OUTREACH_", "OPENAI_", "GROQ_", "XAI_")) or key in {"GMAIL_ACCESS_TOKEN", "BRAVE_SEARCH_API_KEY"}:
             monkeypatch.delenv(key)
     monkeypatch.setenv("OUTREACH_DATA_DIR", str(tmp_path / "application-data"))
 

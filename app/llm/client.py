@@ -32,6 +32,8 @@ class ModelProviderError(ModelClientError):
 
     _messages = {
         "invalid_key": "The API key was rejected. Check the provider key in .env and restart the application.",
+        "credits_required": "The provider requires available API credits. Check the team's API billing and spending limit in its console.",
+        "xai_access_denied": "Access was denied. Check the key's model and endpoint permissions, team API credits, and spending limit in xAI Console.",
         "organization_model_blocked": "The configured model is blocked by your organization. Allow it in Settings > Organization > Limits, save, then retry.",
         "project_model_blocked": "The configured model is blocked by your project. Allow it in Settings > Projects > Limits, save, then retry.",
         "permission_denied": "Access to the configured model was denied. Check organization and project model permissions.",
@@ -44,7 +46,7 @@ class ModelProviderError(ModelClientError):
     }
 
     def __init__(self, *, provider: str, reason: str, status_code: int | None = None):
-        self.provider = provider if provider in {"Groq", "OpenAI"} else "Model provider"
+        self.provider = provider if provider in {"Groq", "OpenAI", "xAI"} else "Model provider"
         self.reason = reason if reason in self._messages else "request_failed"
         self.status_code = status_code if type(status_code) is int and 100 <= status_code <= 599 else None
         self.retryable = self.reason in {"service_unavailable", "connection_failed"}

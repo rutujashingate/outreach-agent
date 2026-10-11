@@ -11,6 +11,7 @@ from openai import AsyncOpenAI
 from app.storage.repository import Repository
 from app.llm.client import OpenAIModelClient
 from app.llm.groq_client import GroqModelClient
+from app.llm.xai_client import XAIModelClient
 from app.domain.workflow import ApprovalSubmission, RunResponse, WorkflowRequest, WorkflowState
 from app.storage.events import events, trace
 from app.agent.context import ManagedModelClient, ManagedSearchTool, WorkflowContext
@@ -40,25 +41,28 @@ async def real_model_client(settings: Settings):
     """Open the SDK lazily: approving or rejecting may need no model call."""
     import os
     sdk = None
-    groq = None
+    http_model = None
     class LazyClient:
         last_usage = {}
         model_name = None
 
         async def generate_structured(self, **kwargs):
-            nonlocal sdk, groq
-            if settings.model_provider == "groq":
-                if groq is None:
+            nonlocal sdk, http_model
+            if settings.model_provider in {"groq", "xai"}:
+                if http_model is None:
+                    adapter = XAIModelClient if settings.model_provider == "xai" else GroqModelClient
                     try:
-                        groq = GroqModelClient.from_env(
+                        http_model = adapter.from_env(
                             max_output_tokens=settings.limits.max_output_tokens,
                             timeout=settings.limits.model_timeout,
                         )
                     except ValueError as error:
+                        if settings.model_provider == "xai":
+                            raise ConfigurationError("Configure XAI_API_KEY, a supported XAI_MODEL, and XAI_REASONING_EFFORT in .env, then restart.") from error
                         raise ConfigurationError("Configure GROQ_API_KEY and a supported GROQ_MODEL for complete runs.") from error
-                result = await groq.generate_structured(**kwargs)
-                self.last_usage = groq.last_usage
-                self.model_name = groq.model_name
+                result = await http_model.generate_structured(**kwargs)
+                self.last_usage = http_model.last_usage
+                self.model_name = http_model.model_name
                 return result
             api_key, model = os.getenv("OPENAI_API_KEY", ""), os.getenv("OPENAI_MODEL", "")
             if not api_key.strip() or not model.strip():
@@ -76,8 +80,8 @@ async def real_model_client(settings: Settings):
     try:
         yield LazyClient()
     finally:
-        if groq is not None:
-            await groq.aclose()
+        if http_model is not None:
+            await http_model.aclose()
         if sdk is not None:
             await sdk.close()
 

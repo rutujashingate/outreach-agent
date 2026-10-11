@@ -1,5 +1,16 @@
 # Local validation
 
+## Grok on xAI — October 10, 2026
+
+- **425 tests passed** with `RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/python -m pytest -o addopts='' -q`, including local Chromium/OCR and the existing simulated evaluations. The focused provider, Telegram-conversation, and dashboard suite passed all 102 tests.
+- The xAI adapter was exercised through simulated HTTP responses: structured JSON requests, explicit reasoning `none`, bounded visible output, `store=false`, local record validation, reported token counts, incomplete output, refusals, and connection failures.
+- A normal fake Telegram greeting reached the real xAI adapter and returned one reply without starting outreach. A repeated update did not duplicate work. A six-call outreach run reached approval and resumed without another model request.
+- Simulated invalid keys, missing credits, denied access, unavailable models, bad requests, and rate limits stopped after one attempt. A temporary server failure made at most two attempts. Saved errors and Telegram notifications contained fixed explanations without provider response bodies or credentials. Existing budget accounting was retained.
+- Dashboard status checks the selected xAI key, including blank/whitespace handling, without exposing it or treating other providers' keys as configured. Tests isolate exported xAI credentials alongside other settings.
+- Local configuration was checked without a model request. An empty duplicate `XAI_API_KEY` was removed while preserving the entered key, and `OUTREACH_MODEL_PROVIDER=xai` was set explicitly. The shared template contains blank credentials; local credentials and databases stay outside Git.
+
+No live xAI/Groq requests, Telegram messages, or Gmail actions were made for this change. The owner's first Telegram request after restart must still verify xAI key validity, model permissions, available credits, and real response quality. The offline checks do not establish those account conditions.
+
 ## Model failure explanations — October 10, 2026
 
 - **391 tests passed**, including local Chromium/OCR, with `RUN_BROWSER_TESTS=1 RUN_OCR_TESTS=1 .venv/bin/python -m pytest -o addopts='' -q`.
@@ -63,7 +74,7 @@ Existing local `.env` credentials and database files were preserved. Manual serv
 
 - **Real Telegram delivery:** configure the bot token and owner ID, then test normal messages, a file/web question, a follow-up, and an outreach proposal. `/guided` remains available for the original step-by-step flow.
 - **Real Google connection and actions:** configure the Google web client and encryption key, complete consent, create an approved draft addressed to yourself, then explicitly enable and approve a separate test send to yourself. No real Gmail draft or email was created during this implementation.
-- **Live Groq quality:** provide your model key and review real sourced results. The simulated eval scores are not live model benchmarks.
+- **Live model quality:** configure the selected xAI, Groq, or OpenAI key and review real sourced results. The simulated eval scores are not live model benchmarks.
 - **Docker build/run and Linux hosting:** Docker is not installed on the development machine. Dockerfile/Compose packaging is provided, but a container build and host-specific Chromium sandbox operation have not been verified. Remote hosting has not been performed.
 
 Follow [setup](SETUP.md) for these checks. Local implementation is complete; live connector acceptance remains separate until the configured accounts and hosting environment are exercised.

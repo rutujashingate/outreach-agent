@@ -40,11 +40,12 @@ class DemoMessage(BaseModel):
 def connections(request):
     manager = service(request).manager
     settings = manager.settings
+    model_key = {'groq': 'GROQ_API_KEY', 'openai': 'OPENAI_API_KEY', 'xai': 'XAI_API_KEY'}[settings.model_provider]
     gmail = manager.gmail.status() if manager.gmail and hasattr(manager.gmail, 'status') else {'connected': False}
     return {'gmail': gmail, 'telegram': service(request).store.get('telegram_status', {'health': 'disabled'}),
             'browser': {'available': manager.browser is not None}, 'search': {'configured': manager.search is not None},
             'documents': service(request).documents.status(),
-            'model': {'provider': settings.model_provider, 'configured': settings.demo or bool(os.getenv('GROQ_API_KEY' if settings.model_provider == 'groq' else 'OPENAI_API_KEY'))}, 'demo': settings.demo,
+            'model': {'provider': settings.model_provider, 'configured': settings.demo or bool(os.getenv(model_key, '').strip())}, 'demo': settings.demo,
             'sender_profile': service(request).store.get('sender_profile', {'name': 'User', 'context': ''})}
 
 
